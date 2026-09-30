@@ -624,22 +624,6 @@ def extract_model(data):
 # ---------------------------------------------------------------------------
 # 通用"探测/测试"响应：不针对任何客户端硬编码，完全依据请求内容推导
 # ---------------------------------------------------------------------------
-GREETING_TAILS = [
-    "How can I help you today?",
-    "How can I assist you today?",
-    "What can I do for you today?",
-]
-
-def _is_greeting(text):
-    t = text.strip().lower().strip("!。.,， ")
-    return t in ("hi", "hello", "hey", "yo", "hi there", "hello there")
-
-def make_greeting_reply(user_text):
-    """根据用户问候动态生成一句普通回复（措辞随机，像真模型）。"""
-    low = user_text.strip().lower()
-    head = "Hi" if low.startswith("hi") and not low.startswith("hello") else "Hello"
-    return head + "! " + random.choice(GREETING_TAILS)
-
 def _extract_quoted(text):
     if not isinstance(text, str):
         return None
@@ -686,10 +670,7 @@ def analyze_request(data):
             if fn is not None:
                 return ("tool", fn, build_probe_arguments(fn, user_text))
 
-    # 2) 寒暄 / 连接测试：消息很少且是纯问候
-    if len(msgs) <= 2 and _is_greeting(user_text):
-        return ("chat", None, make_greeting_reply(user_text))
-
+    # 其余一律不处理 → 走 V50（"使用就触发"，只有带 tools 的探测才特殊处理）
     return None
 
 class CrazyThursdayHandler(BaseHTTPRequestHandler):
