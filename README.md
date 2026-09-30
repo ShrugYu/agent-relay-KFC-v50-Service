@@ -39,10 +39,10 @@ go build -o kfcgo .     # 需要 Go 1.20+
 
 ## 模型列表（14 个）
 
-- DeepSeek：`deepseek-v4-pro`、`deepseek-v4-flash`、`deepseekv4.1-flash`
-- Anthropic：`claude-opus-5.5`、`claude-opus-5.0`
-- OpenAI：`gpt-6-astra`、`gpt-6-luna`、`gpt-6-sol`、`gpt-5.5-sol`、`gpt-5.3-codex`、`gpt-5.5`
+- Anthropic / Claude：`claude-opus-5.5`、`claude-opus-5.0`
+- OpenAI / GPT：`gpt-6-astra`、`gpt-6-luna`、`gpt-6-sol`、`gpt-5.5-sol`、`gpt-5.5`、`gpt-5.3-codex`
 - Zhipu / GLM：`glm-5.3`、`gml-5.3-flash`、`glm-5.2`
+- DeepSeek：`deepseekv4.1-flash`、`deepseek-v4-pro`、`deepseek-v4-flash`
 
 示例（curl）：
 
