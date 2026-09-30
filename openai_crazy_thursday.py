@@ -131,28 +131,28 @@ def split_stream_parts(text):
 # ---------------------------------------------------------------------------
 # 真实模型目录（按用户指定名单维护，未提及的模型已全部移除）
 # ---------------------------------------------------------------------------
+# 模型目录：按"分类 + 同类内贵的在前"排列（不做排序，定义顺序即对外暴露顺序）
 MODEL_CATALOG = [
-    # DeepSeek
-    ("deepseek-v4-pro", "deepseek"),
-    ("deepseek-v4-flash", "deepseek"),
-    ("deepseekv4.1-flash", "deepseek"),
-    # Anthropic
+    # Anthropic / Claude（5.5 在前）
     ("claude-opus-5.5", "anthropic"),
     ("claude-opus-5.0", "anthropic"),
-    # OpenAI
+    # OpenAI / GPT（6 系 > 5.5 系 > 5.3 系）
     ("gpt-6-astra", "openai"),
     ("gpt-6-luna", "openai"),
     ("gpt-6-sol", "openai"),
     ("gpt-5.5-sol", "openai"),
-    ("gpt-5.3-codex", "openai"),
     ("gpt-5.5", "openai"),
-    # Zhipu / GLM
+    ("gpt-5.3-codex", "openai"),
+    # Zhipu / GLM（5.3 > 5.3-flash > 5.2）
     ("glm-5.3", "zhipuai"),
     ("gml-5.3-flash", "zhipuai"),
     ("glm-5.2", "zhipuai"),
+    # DeepSeek（4.1 > 4）
+    ("deepseekv4.1-flash", "deepseek"),
+    ("deepseek-v4-pro", "deepseek"),
+    ("deepseek-v4-flash", "deepseek"),
 ]
 
-MODEL_CATALOG = sorted(MODEL_CATALOG, key=lambda x: x[0])
 MODEL_IDS = [m[0] for m in MODEL_CATALOG]
 
 # 中转站默认兜底模型（new-api 风格，优先用 OpenAI 系）
