@@ -632,6 +632,35 @@ def _extract_quoted(text):
         return m.group(1)
     return None
 
+# 客户端"测试连接"的典型形态（结构性识别，不匹配具体词）
+PROBE_GREETINGS = ("hi", "hello", "hey", "yo", "hi there", "hello there")
+PROBE_TAILS = [
+    "How can I help you today?",
+    "How can I assist you today?",
+    "What can I do for you today?",
+]
+
+def make_probe_reply(user_text):
+    low = user_text.strip().lower()
+    head = "Hi" if low.startswith("hi") and not low.startswith("hello") else "Hello"
+    return head + "! " + random.choice(PROBE_TAILS)
+
+def is_chat_probe(msgs, user_text):
+    """只认客户端测试的典型结构：
+       1) 单条英文短问候（Operit 的聊天测试）
+       2) system 是"通用助手设定"（很短、含 assistant）+ 一条 user（RikkaHub 的聊天测试）
+       中文正常聊天、带历史的多轮对话都不会命中 → 照常 V50。"""
+    low = user_text.strip().lower().strip("!。.,， ")
+    if len(msgs) == 1 and low in PROBE_GREETINGS:
+        return True
+    if len(msgs) == 2:
+        first = msgs[0] if isinstance(msgs[0], dict) else {}
+        if first.get("role") == "system":
+            sc = first.get("content")
+            if isinstance(sc, str) and 0 < len(sc.strip()) <= 60 and "assistant" in sc.lower():
+                return True
+    return False
+
 def analyze_request(data):
     """依据请求内容判断"像真模型一样"该怎么回，返回 (kind, fn, payload) 或 None。
     完全通用，不绑定任何具体客户端：
@@ -670,7 +699,11 @@ def analyze_request(data):
             if fn is not None:
                 return ("tool", fn, build_probe_arguments(fn, user_text))
 
-    # 其余一律不处理 → 走 V50（"使用就触发"，只有带 tools 的探测才特殊处理）
+    # 2) 聊天测试（客户端"测试连接"的典型结构；不误伤中文正常聊天）
+    if is_chat_probe(msgs, user_text):
+        return ("chat", None, make_probe_reply(user_text))
+
+    # 其余一律不处理 → 走 V50（"使用就触发"）
     return None
 
 class CrazyThursdayHandler(BaseHTTPRequestHandler):
