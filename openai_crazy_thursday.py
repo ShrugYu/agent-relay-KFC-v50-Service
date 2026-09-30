@@ -14,6 +14,7 @@ import uuid
 import time
 import os
 import random
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -402,8 +403,8 @@ def build_tool_arguments(fn):
         field = "message"
     return json.dumps({field: PLAIN_ANSWER}, ensure_ascii=False)
 
-def build_probe_arguments(fn):
-    """探测用工具参数：填中性值（如 ping），避免把 V50 文案暴露给客户端的测试结果。"""
+def build_probe_arguments(fn, user_text=""):
+    """探测用工具参数：优先取请求文本里引号中的值（如 "…ping"），否则按 schema 选字段。"""
     field = None
     params = fn.get("parameters") if isinstance(fn, dict) else None
     if isinstance(params, dict):
@@ -413,9 +414,12 @@ def build_probe_arguments(fn):
             field = required[0]
         elif props:
             field = list(props.keys())[0]
-    if field:
-        return json.dumps({field: "ping"}, ensure_ascii=False)
-    return "{}"
+    if not field:
+        return "{}"
+    val = _extract_quoted(user_text)
+    if val is None:
+        val = ""
+    return json.dumps({field: val}, ensure_ascii=False)
 
 def make_tool_call_response(model, fn, prompt_tokens=13, args=None):
     """工具调用响应：函数名取自选中的工具；args 为空时把 V50 填进参数。"""
@@ -613,52 +617,64 @@ def extract_model(data):
             return m.strip()
     return DEFAULT_MODEL
 
-# 客户端连接测试（RikkaHub / Operit 等）命中时返回的正常回复，避免把 V50 文案暴露在"测试结果"里
-PROBE_REPLY = "Hello! I'm doing well, thank you. How can I help you today?"
+# ---------------------------------------------------------------------------
+# 通用"探测/测试"响应：不针对任何客户端硬编码，完全依据请求内容推导
+# ---------------------------------------------------------------------------
+GREETING_TAILS = [
+    "How can I help you today?",
+    "How can I assist you today?",
+    "What can I do for you today?",
+]
 
-def detect_probe(data):
-    """识别客户端"测试连接/测试模型"请求。
-    返回 ("tool", fn) / ("chat", None) / None。
-    指纹来自 RikkaHub 与 Operit 的开源代码：
-      - RikkaHub: [system "You are a helpful assistant", user "hello"]（另加 get_current_time 工具探测）
-      - Operit:   单条 user "Hi"（另加 "Call the echo tool with the text \\"ping\\"." 工具探测）
+def _is_greeting(text):
+    t = text.strip().lower().strip("!。.,， ")
+    return t in ("hi", "hello", "hey", "yo", "你好", "嗨", "hi there", "hello there")
+
+def make_greeting_reply(user_text):
+    """根据用户问候动态生成一句普通回复（措辞随机，像真模型）。"""
+    low = user_text.strip().lower()
+    head = "Hi" if low.startswith("hi") and not low.startswith("hello") else "Hello"
+    return head + "! " + random.choice(GREETING_TAILS)
+
+def _extract_quoted(text):
+    if not isinstance(text, str):
+        return None
+    m = re.search(r'["“”\']([^"“”\']{1,80})["“”\']', text)
+    if m:
+        return m.group(1)
+    return None
+
+def analyze_request(data):
+    """依据请求内容判断"像真模型一样"该怎么回，返回 (kind, fn, payload) 或 None。
+    完全通用，不绑定任何具体客户端：
+      - 带 tools 且最后一条 user 消息要求调用工具（含 tool/call/use/ping 等）→ 回 tool_call
+      - 无 tools 且消息很少、是寒暄 → 回一句普通问候
+      - 其余一律不处理（走 V50 整蛊）
     """
     if not isinstance(data, dict):
         return None
     msgs = data.get("messages")
-    tools = data.get("tools")
     if not isinstance(msgs, list) or not msgs:
         return None
-    texts = []
+    user_text = ""
     for m in msgs:
-        if isinstance(m, dict):
-            c = m.get("content")
-            if isinstance(c, str):
-                texts.append((m.get("role"), c.strip()))
+        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str):
+            user_text = m["content"]
 
-    # 工具探测：带 tools，且最后一条 user 文本是"调用某工具"的指令
-    if tools:
-        last_user = None
-        for r, t in texts:
-            if r == "user":
-                last_user = t
-        if last_user:
-            low = last_user.lower()
-            if "tool" in low and ("call" in low or "use" in low or "调用" in low):
-                return ("tool", first_tool_fn(tools) or {"name": "crazy_thursday", "parameters": {}})
-            if "ping" in low:
-                return ("tool", first_tool_fn(tools) or {"name": "crazy_thursday", "parameters": {}})
+    # 1) 工具相关：从请求自带的 tools 里推导，工具名与参数都来自请求
+    tools = data.get("tools")
+    if isinstance(tools, list) and tools:
+        low = user_text.lower()
+        wants_tool = (data.get("tool_choice") == "required") or \
+            any(k in low for k in ("tool", "call", "use", "调用", "ping"))
+        if wants_tool:
+            fn = pick_completion_tool(tools) or first_tool_fn(tools)
+            if fn is not None:
+                return ("tool", fn, build_probe_arguments(fn, user_text))
 
-    # 聊天探测 1（RikkaHub）：[system "You are a helpful assistant", user "hello"]
-    if len(texts) == 2:
-        r0, t0 = texts[0]
-        r1, t1 = texts[1]
-        if r0 == "system" and "helpful assistant" in t0.lower() and t1.lower() in ("hello", "hi", "hi!", "hey", "你好"):
-            return ("chat", None)
-
-    # 聊天探测 2（Operit）：单条 user "Hi"
-    if len(texts) == 1 and texts[0][0] == "user" and texts[0][1].lower() in ("hi", "hello", "hi!", "hey", "你好"):
-        return ("chat", None)
+    # 2) 寒暄 / 连接测试：消息很少且是纯问候
+    if len(msgs) <= 2 and _is_greeting(user_text):
+        return ("chat", None, make_greeting_reply(user_text))
 
     return None
 
@@ -898,26 +914,25 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
 
         # 客户端"测试连接/测试模型"探测（RikkaHub / Operit 等）：
         # 命中则返回正常的助手回复（或工具调用），避免把 V50 文案暴露在它们的测试结果里
-        probe = detect_probe(data)
+        probe = analyze_request(data)
         if probe is not None:
-            pk, pfn = probe
+            pk, pfn, pval = probe
             if pk == "tool":
-                pargs = build_probe_arguments(pfn)
                 if stream:
                     self._start_sse()
                     think_delay()
-                    self._write_chunks(make_stream_tool_call_chunks(model, pfn, prompt_tokens, include_usage, args=pargs))
+                    self._write_chunks(make_stream_tool_call_chunks(model, pfn, prompt_tokens, include_usage, args=pval))
                 else:
                     think_delay()
-                    self._json(make_tool_call_response(model, pfn, prompt_tokens, args=pargs))
+                    self._json(make_tool_call_response(model, pfn, prompt_tokens, args=pval))
             else:
                 if stream:
                     self._start_sse()
                     think_delay()
-                    self._write_chunks(make_stream_chunks(model, prompt_tokens, include_usage, content=PROBE_REPLY))
+                    self._write_chunks(make_stream_chunks(model, prompt_tokens, include_usage, content=pval))
                 else:
                     think_delay()
-                    self._json(make_chat_response(model, prompt_tokens, PROBE_REPLY))
+                    self._json(make_chat_response(model, prompt_tokens, pval))
             return
 
         tools = data.get("tools") if isinstance(data, dict) else None
