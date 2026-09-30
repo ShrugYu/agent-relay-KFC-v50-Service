@@ -428,6 +428,7 @@ func modelsListObj() map[string]any {
 	for _, m := range modelCatalog {
 		data = append(data, map[string]any{
 			"id": m.ID, "object": "model", "created": 1700000000, "owned_by": m.Owner,
+			"name": m.ID, "display_name": m.ID, "context_window": 128000, "max_tokens": 8192,
 			"permission": []any{map[string]any{
 				"id": newID("modelperm"), "object": "model_permission", "created": 1700000000,
 				"allow_create_engine": false, "allow_sampling": true, "allow_logprobs": true,
