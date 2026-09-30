@@ -963,32 +963,11 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
                     self._json(make_chat_response(model, prompt_tokens, pval))
             return
 
-        tools = data.get("tools") if isinstance(data, dict) else None
-        tool_choice = data.get("tool_choice") if isinstance(data, dict) else None
-
-        # 工具调用决策：
-        #  - 带了 tools 且其中有"完成类"工具（如 Cline 的 attempt_completion）-> 调用它，参数填 V50
-        #  - 客户端强制 tool_choice:"required" -> 用第一个工具
-        #  - 其余情况一律返回文本，保证整蛊效果
-        fn = pick_completion_tool(tools)
-        if fn is None and tool_choice == "required":
-            fn = first_tool_fn(tools)
-        if fn is None and tool_choice == "required":
-            fn = {"name": "crazy_thursday", "parameters": {}}
-
-        if fn is not None:
-            if stream:
-                self._start_sse()
-                think_delay()  # 首字前"思考中"
-                self._write_chunks(make_stream_tool_call_chunks(model, fn, prompt_tokens, include_usage))
-            else:
-                think_delay()
-                self._json(make_tool_call_response(model, fn, prompt_tokens))
-            return
-
+        # 工具调用只在 analyze_request 里按"请求是否点名工具 / tool_choice=required"处理；
+        # 这里不再猜测"完成类工具"，否则正常聊天会被误判成工具调用（会无限循环）
         if stream:
             self._start_sse()
-            think_delay()  # 首字前"思考中"
+            think_delay()
             self._write_chunks(make_stream_chunks(model, prompt_tokens, include_usage))
             return
 
