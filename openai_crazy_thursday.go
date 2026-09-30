@@ -340,19 +340,32 @@ func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 			}
 		}
 	}
-	// 1) 工具：从请求自带的 tools 推导
+	// 1) 工具：一切从请求推导，不做关键词硬编码
 	tools, _ := data["tools"].([]any)
 	if len(tools) > 0 {
 		low := strings.ToLower(userText)
-		tc, _ := data["tool_choice"].(string)
-		wants := tc == "required" || strings.Contains(low, "tool") || strings.Contains(low, "call") ||
-			strings.Contains(low, "use") || strings.Contains(low, "调用") || strings.Contains(low, "ping")
-		if wants {
-			fn := pickCompletionTool(tools)
-			if fn == nil {
-				fn = firstToolFn(tools)
+		// (a) 用户消息里点名了某个工具（工具名来自请求）→ 调用它
+		var named map[string]any
+		for _, t := range tools {
+			tt, ok := t.(map[string]any)
+			if !ok {
+				continue
 			}
-			if fn != nil {
+			fn, ok := tt["function"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if nm, ok := fn["name"].(string); ok && nm != "" && strings.Contains(low, strings.ToLower(nm)) {
+				named = fn
+				break
+			}
+		}
+		if named != nil {
+			return "tool", named, buildProbeArguments(named, userText)
+		}
+		// (b) 强制 tool_choice=required → 用第一个工具
+		if tc, _ := data["tool_choice"].(string); tc == "required" {
+			if fn := firstToolFn(tools); fn != nil {
 				return "tool", fn, buildProbeArguments(fn, userText)
 			}
 		}
