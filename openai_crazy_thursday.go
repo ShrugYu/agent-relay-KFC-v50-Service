@@ -837,30 +837,8 @@ func chatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tools, _ := data["tools"].([]any)
-	toolChoice, _ := data["tool_choice"].(string)
-
-	fn := pickCompletionTool(tools)
-	if fn == nil && toolChoice == "required" {
-		fn = firstToolFn(tools)
-	}
-	if fn == nil && toolChoice == "required" {
-		fn = map[string]any{"name": "crazy_thursday", "parameters": map[string]any{}}
-	}
-
-	if fn != nil {
-		if stream {
-			flusher, _ := w.(http.Flusher)
-			startSSE(w)
-			thinkDelaySleep()
-			streamToolChunks(w, flusher, model, fn, promptTokens, includeUsage)
-		} else {
-			thinkDelaySleep()
-			writeJSON(w, 200, toolCallResponse(model, fn, promptTokens))
-		}
-		return
-	}
-
+	// 工具调用只在 analyzeRequest 里按"请求是否点名工具 / tool_choice=required"处理；
+	// 这里不再猜测"完成类工具"，否则正常聊天会被误判成工具调用（会无限循环）
 	if stream {
 		flusher, _ := w.(http.Flusher)
 		startSSE(w)
