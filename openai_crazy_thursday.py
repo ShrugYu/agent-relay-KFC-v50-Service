@@ -256,10 +256,10 @@ def make_chat_response(model, prompt_tokens=13, content=None):
         "system_fingerprint": "fp_" + uuid.uuid4().hex[:16],
     }
 
-def make_stream_chunks(model, prompt_tokens=13, include_usage=False):
+def make_stream_chunks(model, prompt_tokens=13, include_usage=False, content=None):
     rid = new_id("chatcmpl")
     ts = now_unix()
-    reply = THE_ANSWER
+    reply = THE_ANSWER if content is None else content
     parts = split_stream_parts(reply)  # 按 token 样式分段返回（每段一小串字符）
 
     def chunk(delta, finish=False):
@@ -402,10 +402,26 @@ def build_tool_arguments(fn):
         field = "message"
     return json.dumps({field: PLAIN_ANSWER}, ensure_ascii=False)
 
-def make_tool_call_response(model, fn, prompt_tokens=13):
-    """工具调用响应：函数名取自选中的工具，参数里填 V50。"""
+def build_probe_arguments(fn):
+    """探测用工具参数：填中性值（如 ping），避免把 V50 文案暴露给客户端的测试结果。"""
+    field = None
+    params = fn.get("parameters") if isinstance(fn, dict) else None
+    if isinstance(params, dict):
+        required = params.get("required") or []
+        props = params.get("properties") or {}
+        if required:
+            field = required[0]
+        elif props:
+            field = list(props.keys())[0]
+    if field:
+        return json.dumps({field: "ping"}, ensure_ascii=False)
+    return "{}"
+
+def make_tool_call_response(model, fn, prompt_tokens=13, args=None):
+    """工具调用响应：函数名取自选中的工具；args 为空时把 V50 填进参数。"""
     name = (fn.get("name") if isinstance(fn, dict) else None) or "crazy_thursday"
-    args = build_tool_arguments(fn)
+    if args is None:
+        args = build_tool_arguments(fn)
     pt = max(1, prompt_tokens)
     ct = estimate_tokens(args)
     return {
@@ -435,10 +451,12 @@ def make_tool_call_response(model, fn, prompt_tokens=13):
         "system_fingerprint": "fp_" + uuid.uuid4().hex[:16],
     }
 
-def make_stream_tool_call_chunks(model, fn, prompt_tokens=13, include_usage=False):
+def make_stream_tool_call_chunks(model, fn, prompt_tokens=13, include_usage=False, args=None):
     """流式工具调用：首块带 id/name，随后 arguments 增量，末块 finish_reason=tool_calls。"""
     name = (fn.get("name") if isinstance(fn, dict) else None) or "crazy_thursday"
-    arguments = build_tool_arguments(fn)
+    if args is None:
+        args = build_tool_arguments(fn)
+    arguments = args
     rid = new_id("chatcmpl")
     ts = now_unix()
     call_id = "call_" + uuid.uuid4().hex[:24]
@@ -594,6 +612,55 @@ def extract_model(data):
         if isinstance(m, str) and m.strip():
             return m.strip()
     return DEFAULT_MODEL
+
+# 客户端连接测试（RikkaHub / Operit 等）命中时返回的正常回复，避免把 V50 文案暴露在"测试结果"里
+PROBE_REPLY = "Hello! I'm doing well, thank you. How can I help you today?"
+
+def detect_probe(data):
+    """识别客户端"测试连接/测试模型"请求。
+    返回 ("tool", fn) / ("chat", None) / None。
+    指纹来自 RikkaHub 与 Operit 的开源代码：
+      - RikkaHub: [system "You are a helpful assistant", user "hello"]（另加 get_current_time 工具探测）
+      - Operit:   单条 user "Hi"（另加 "Call the echo tool with the text \\"ping\\"." 工具探测）
+    """
+    if not isinstance(data, dict):
+        return None
+    msgs = data.get("messages")
+    tools = data.get("tools")
+    if not isinstance(msgs, list) or not msgs:
+        return None
+    texts = []
+    for m in msgs:
+        if isinstance(m, dict):
+            c = m.get("content")
+            if isinstance(c, str):
+                texts.append((m.get("role"), c.strip()))
+
+    # 工具探测：带 tools，且最后一条 user 文本是"调用某工具"的指令
+    if tools:
+        last_user = None
+        for r, t in texts:
+            if r == "user":
+                last_user = t
+        if last_user:
+            low = last_user.lower()
+            if "tool" in low and ("call" in low or "use" in low or "调用" in low):
+                return ("tool", first_tool_fn(tools) or {"name": "crazy_thursday", "parameters": {}})
+            if "ping" in low:
+                return ("tool", first_tool_fn(tools) or {"name": "crazy_thursday", "parameters": {}})
+
+    # 聊天探测 1（RikkaHub）：[system "You are a helpful assistant", user "hello"]
+    if len(texts) == 2:
+        r0, t0 = texts[0]
+        r1, t1 = texts[1]
+        if r0 == "system" and "helpful assistant" in t0.lower() and t1.lower() in ("hello", "hi", "hi!", "hey", "你好"):
+            return ("chat", None)
+
+    # 聊天探测 2（Operit）：单条 user "Hi"
+    if len(texts) == 1 and texts[0][0] == "user" and texts[0][1].lower() in ("hi", "hello", "hi!", "hey", "你好"):
+        return ("chat", None)
+
+    return None
 
 class CrazyThursdayHandler(BaseHTTPRequestHandler):
     server_version = "OpenAI-API/1.0"
@@ -828,6 +895,30 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
         stream_opts = data.get("stream_options") or {}
         include_usage = bool(stream_opts.get("include_usage")) if isinstance(stream_opts, dict) else False
         prompt_tokens = count_prompt_tokens(data)
+
+        # 客户端"测试连接/测试模型"探测（RikkaHub / Operit 等）：
+        # 命中则返回正常的助手回复（或工具调用），避免把 V50 文案暴露在它们的测试结果里
+        probe = detect_probe(data)
+        if probe is not None:
+            pk, pfn = probe
+            if pk == "tool":
+                pargs = build_probe_arguments(pfn)
+                if stream:
+                    self._start_sse()
+                    think_delay()
+                    self._write_chunks(make_stream_tool_call_chunks(model, pfn, prompt_tokens, include_usage, args=pargs))
+                else:
+                    think_delay()
+                    self._json(make_tool_call_response(model, pfn, prompt_tokens, args=pargs))
+            else:
+                if stream:
+                    self._start_sse()
+                    think_delay()
+                    self._write_chunks(make_stream_chunks(model, prompt_tokens, include_usage, content=PROBE_REPLY))
+                else:
+                    think_delay()
+                    self._json(make_chat_response(model, prompt_tokens, PROBE_REPLY))
+            return
 
         tools = data.get("tools") if isinstance(data, dict) else None
         tool_choice = data.get("tool_choice") if isinstance(data, dict) else None
