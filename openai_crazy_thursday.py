@@ -54,7 +54,7 @@ SERVER_ID = "crazy-thursday-relay"
 
 # ---- 拟真时序（模拟真实模型的思考延迟与逐字输出，可用环境变量覆盖）----
 # 首响应前的"思考中"时长（秒），带 ±0.6s 抖动，看起来不机械
-THINK_DELAY = float(os.environ.get("CT_THINK_DELAY", "1.5"))
+THINK_DELAY = float(os.environ.get("CT_THINK_DELAY", "3"))
 # 流式逐块吐字的基础间隔（秒），实际会在此基础上随机抖动
 STREAM_CHUNK_DELAY = float(os.environ.get("CT_STREAM_DELAY", "0.028"))
 
@@ -632,7 +632,7 @@ GREETING_TAILS = [
 
 def _is_greeting(text):
     t = text.strip().lower().strip("!。.,， ")
-    return t in ("hi", "hello", "hey", "yo", "你好", "嗨", "hi there", "hello there")
+    return t in ("hi", "hello", "hey", "yo", "hi there", "hello there")
 
 def make_greeting_reply(user_text):
     """根据用户问候动态生成一句普通回复（措辞随机，像真模型）。"""
