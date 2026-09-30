@@ -303,6 +303,44 @@ func extractQuoted(text string) string {
 	return ""
 }
 
+// 客户端"测试连接"的典型形态（结构性识别，不匹配具体词）
+var probeGreetings = map[string]bool{"hi": true, "hello": true, "hey": true, "yo": true, "hi there": true, "hello there": true}
+
+var probeTails = []string{
+	"How can I help you today?",
+	"How can I assist you today?",
+	"What can I do for you today?",
+}
+
+func makeProbeReply(userText string) string {
+	low := strings.ToLower(strings.TrimSpace(userText))
+	head := "Hello"
+	if strings.HasPrefix(low, "hi") && !strings.HasPrefix(low, "hello") {
+		head = "Hi"
+	}
+	return head + "! " + probeTails[mathrand.Intn(len(probeTails))]
+}
+
+func isChatProbe(msgs []any, userText string) bool {
+	low := strings.Trim(strings.ToLower(strings.TrimSpace(userText)), "!。.,， ")
+	if len(msgs) == 1 && probeGreetings[low] {
+		return true
+	}
+	if len(msgs) == 2 {
+		if first, ok := msgs[0].(map[string]any); ok {
+			if r, _ := first["role"].(string); r == "system" {
+				if sc, ok := first["content"].(string); ok {
+					t := strings.TrimSpace(sc)
+					if len(t) > 0 && len(t) <= 60 && strings.Contains(strings.ToLower(sc), "assistant") {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // analyzeRequest 依据请求内容判断"像真模型一样"该怎么回，返回 (kind, fn, payload)
 func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 	msgs, ok := data["messages"].([]any)
@@ -349,7 +387,11 @@ func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 			}
 		}
 	}
-	// 其余一律不处理 → 走 V50（"使用就触发"，只有带 tools 的探测才特殊处理）
+	// 2) 聊天测试（客户端"测试连接"的典型结构；不误伤中文正常聊天）
+	if isChatProbe(msgs, userText) {
+		return "chat", nil, makeProbeReply(userText)
+	}
+	// 其余一律不处理 → 走 V50（"使用就触发"）
 	return "", nil, ""
 }
 
