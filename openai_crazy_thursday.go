@@ -288,6 +288,87 @@ func extractModel(data map[string]any) string {
 	return defaultModel
 }
 
+// 客户端连接测试命中时返回的正常回复，避免把 V50 文案暴露在测试结果里
+const probeReply = "Hello! I'm doing well, thank you. How can I help you today?"
+
+// detectProbe 识别 RikkaHub / Operit 等客户端的"测试连接"请求，返回 ("tool"/"chat", fn)
+func detectProbe(data map[string]any) (string, map[string]any) {
+	msgs, ok := data["messages"].([]any)
+	if !ok || len(msgs) == 0 {
+		return "", nil
+	}
+	type rc struct{ role, text string }
+	texts := []rc{}
+	for _, m := range msgs {
+		if mm, ok := m.(map[string]any); ok {
+			if c, ok := mm["content"].(string); ok {
+				r, _ := mm["role"].(string)
+				texts = append(texts, rc{r, strings.TrimSpace(c)})
+			}
+		}
+	}
+	tools, _ := data["tools"].([]any)
+	if len(tools) > 0 {
+		lastUser := ""
+		for _, t := range texts {
+			if t.role == "user" {
+				lastUser = t.text
+			}
+		}
+		if lastUser != "" {
+			low := strings.ToLower(lastUser)
+			toolish := strings.Contains(low, "tool") && (strings.Contains(low, "call") || strings.Contains(low, "use"))
+			if toolish || strings.Contains(low, "ping") {
+				if fn := firstToolFn(tools); fn != nil {
+					return "tool", fn
+				}
+				return "tool", map[string]any{"name": "crazy_thursday", "parameters": map[string]any{}}
+			}
+		}
+	}
+	isGreet := func(s string) bool {
+		switch strings.ToLower(s) {
+		case "hello", "hi", "hi!", "hey", "你好":
+			return true
+		}
+		return false
+	}
+	// 聊天探测 1（RikkaHub）：[system "You are a helpful assistant", user "hello"]
+	if len(texts) == 2 && texts[0].role == "system" &&
+		strings.Contains(strings.ToLower(texts[0].text), "helpful assistant") && isGreet(texts[1].text) {
+		return "chat", nil
+	}
+	// 聊天探测 2（Operit）：单条 user "Hi"
+	if len(texts) == 1 && texts[0].role == "user" && isGreet(texts[0].text) {
+		return "chat", nil
+	}
+	return "", nil
+}
+
+func buildProbeArguments(fn map[string]any) string {
+	field := ""
+	if params, ok := fn["parameters"].(map[string]any); ok {
+		if req, ok := params["required"].([]any); ok && len(req) > 0 {
+			if s, ok := req[0].(string); ok {
+				field = s
+			}
+		}
+		if field == "" {
+			if props, ok := params["properties"].(map[string]any); ok {
+				for k := range props {
+					field = k
+					break
+				}
+			}
+		}
+	}
+	if field == "" {
+		return "{}"
+	}
+	b, _ := json.Marshal(map[string]any{field: "ping"})
+	return string(b)
+}
+
 func startSSE(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -543,12 +624,15 @@ func buildToolArguments(fn map[string]any) string {
 	return string(b)
 }
 
-func toolCallResponse(model string, fn map[string]any, promptTokens int) map[string]any {
+func toolCallResponse(model string, fn map[string]any, promptTokens int, argsOverride ...string) map[string]any {
 	name, _ := fn["name"].(string)
 	if name == "" {
 		name = "crazy_thursday"
 	}
 	args := buildToolArguments(fn)
+	if len(argsOverride) > 0 && argsOverride[0] != "" {
+		args = argsOverride[0]
+	}
 	if promptTokens < 1 {
 		promptTokens = 1
 	}
@@ -574,9 +658,13 @@ func toolCallResponse(model string, fn map[string]any, promptTokens int) map[str
 // ---------------------------------------------------------------------------
 // 流式
 // ---------------------------------------------------------------------------
-func streamTextChunks(w http.ResponseWriter, flusher http.Flusher, model string, promptTokens int, includeUsage bool) {
+func streamTextChunks(w http.ResponseWriter, flusher http.Flusher, model string, promptTokens int, includeUsage bool, contentOverride ...string) {
 	rid := newID("chatcmpl")
 	ts := nowUnix()
+	reply := theAnswer
+	if len(contentOverride) > 0 && contentOverride[0] != "" {
+		reply = contentOverride[0]
+	}
 	mk := func(delta map[string]any, finish any) map[string]any {
 		return map[string]any{
 			"id": rid, "object": "chat.completion.chunk", "created": ts, "model": model,
@@ -584,13 +672,13 @@ func streamTextChunks(w http.ResponseWriter, flusher http.Flusher, model string,
 		}
 	}
 	sendSSE(w, flusher, mk(map[string]any{"role": "assistant", "content": ""}, nil))
-	for _, p := range splitStreamParts(theAnswer) {
+	for _, p := range splitStreamParts(reply) {
 		sendSSE(w, flusher, mk(map[string]any{"content": p}, nil))
 		streamTick()
 	}
 	sendSSE(w, flusher, mk(map[string]any{}, "stop"))
 	if includeUsage {
-		ct := estimateTokens(theAnswer)
+		ct := estimateTokens(reply)
 		sendSSE(w, flusher, map[string]any{
 			"id": rid, "object": "chat.completion.chunk", "created": ts, "model": model,
 			"choices": []any{},
@@ -603,12 +691,15 @@ func streamTextChunks(w http.ResponseWriter, flusher http.Flusher, model string,
 	}
 }
 
-func streamToolChunks(w http.ResponseWriter, flusher http.Flusher, model string, fn map[string]any, promptTokens int, includeUsage bool) {
+func streamToolChunks(w http.ResponseWriter, flusher http.Flusher, model string, fn map[string]any, promptTokens int, includeUsage bool, argsOverride ...string) {
 	name, _ := fn["name"].(string)
 	if name == "" {
 		name = "crazy_thursday"
 	}
 	args := buildToolArguments(fn)
+	if len(argsOverride) > 0 && argsOverride[0] != "" {
+		args = argsOverride[0]
+	}
 	rid := newID("chatcmpl")
 	ts := nowUnix()
 	callID := newID("call")
@@ -667,6 +758,34 @@ func chatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	promptTokens := countPromptTokens(data)
+
+	// 客户端"测试连接/测试模型"探测（RikkaHub / Operit 等）：命中则返回正常回复
+	if pk, pfn := detectProbe(data); pk != "" {
+		if pk == "tool" {
+			pargs := buildProbeArguments(pfn)
+			if stream {
+				flusher, _ := w.(http.Flusher)
+				startSSE(w)
+				thinkDelaySleep()
+				streamToolChunks(w, flusher, model, pfn, promptTokens, includeUsage, pargs)
+			} else {
+				thinkDelaySleep()
+				writeJSON(w, 200, toolCallResponse(model, pfn, promptTokens, pargs))
+			}
+		} else {
+			if stream {
+				flusher, _ := w.(http.Flusher)
+				startSSE(w)
+				thinkDelaySleep()
+				streamTextChunks(w, flusher, model, promptTokens, includeUsage, probeReply)
+			} else {
+				thinkDelaySleep()
+				writeJSON(w, 200, chatResponse(model, promptTokens, probeReply))
+			}
+		}
+		return
+	}
+
 	tools, _ := data["tools"].([]any)
 	toolChoice, _ := data["tool_choice"].(string)
 
