@@ -293,32 +293,7 @@ func extractModel(data map[string]any) string {
 	return defaultModel
 }
 
-// 通用"探测/测试"响应：不针对任何客户端硬编码，完全依据请求内容推导
-var greetingTails = []string{
-	"How can I help you today?",
-	"How can I assist you today?",
-	"What can I do for you today?",
-}
-
-func isGreeting(text string) bool {
-	t := strings.Trim(strings.ToLower(strings.TrimSpace(text)), "!。.,， ")
-	switch t {
-	case "hi", "hello", "hey", "yo", "hi there", "hello there":
-		return true
-	}
-	return false
-}
-
-func makeGreetingReply(userText string) string {
-	low := strings.ToLower(strings.TrimSpace(userText))
-	head := "Hello"
-	if strings.HasPrefix(low, "hi") && !strings.HasPrefix(low, "hello") {
-		head = "Hi"
-	}
-	tail := greetingTails[mathrand.Intn(len(greetingTails))]
-	return head + "! " + tail
-}
-
+// 通用"探测/测试"响应：完全依据请求内容推导
 var quotedRe = regexp.MustCompile(`["“”']([^"“”']{1,80})["“”']`)
 
 func extractQuoted(text string) string {
@@ -374,10 +349,7 @@ func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 			}
 		}
 	}
-	// 2) 寒暄 / 连接测试
-	if len(msgs) <= 2 && isGreeting(userText) {
-		return "chat", nil, makeGreetingReply(userText)
-	}
+	// 其余一律不处理 → 走 V50（"使用就触发"，只有带 tools 的探测才特殊处理）
 	return "", nil, ""
 }
 
