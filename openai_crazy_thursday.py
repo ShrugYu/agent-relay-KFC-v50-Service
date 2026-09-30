@@ -661,14 +661,24 @@ def analyze_request(data):
         if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str):
             user_text = m["content"]
 
-    # 1) 工具相关：从请求自带的 tools 里推导，工具名与参数都来自请求
+    # 1) 工具相关：一切从请求推导，不做任何关键词硬编码
     tools = data.get("tools")
     if isinstance(tools, list) and tools:
         low = user_text.lower()
-        wants_tool = (data.get("tool_choice") == "required") or \
-            any(k in low for k in ("tool", "call", "use", "调用", "ping"))
-        if wants_tool:
-            fn = pick_completion_tool(tools) or first_tool_fn(tools)
+        # (a) 用户消息里直接点名了某个工具（工具名来自请求）→ 调用它
+        named = None
+        for t in tools:
+            fn = t.get("function") if isinstance(t, dict) else None
+            if isinstance(fn, dict):
+                nm = fn.get("name")
+                if isinstance(nm, str) and nm and nm.lower() in low:
+                    named = fn
+                    break
+        if named is not None:
+            return ("tool", named, build_probe_arguments(named, user_text))
+        # (b) 客户端强制 tool_choice=required → 用第一个工具
+        if data.get("tool_choice") == "required":
+            fn = first_tool_fn(tools)
             if fn is not None:
                 return ("tool", fn, build_probe_arguments(fn, user_text))
 
