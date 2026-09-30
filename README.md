@@ -10,11 +10,24 @@
 python3 openai_crazy_thursday.py
 ```
 
-服务默认监听 `127.0.0.1:8788`。后台运行：
+服务默认监听 `127.0.0.1:8788`。服务器部署（对公网、systemd 开机自启、Nginx 反代 + HTTPS）详见 **[DEPLOY.md](DEPLOY.md)**。
+
+后台运行：
 
 ```bash
 nohup python3 openai_crazy_thursday.py > /tmp/crazy.log 2>&1 &
 ```
+
+### Go 版（可选，同样零依赖）
+
+同目录下还有一份等价的 Go 实现 `openai_crazy_thursday.go`，接口与 Python 版完全一致，适合不装 Python 或想要单文件二进制的场景（类似 new-api 的 Go 技术栈）。
+
+```bash
+go build -o kfcgo .     # 需要 Go 1.20+
+./kfcgo                 # 或 go run .
+```
+
+环境变量与 Python 版相同（`CT_HOST` / `CT_PORT` / `CT_BASE_URL` / `CT_THINK_DELAY` / `CT_STREAM_DELAY`）。
 
 ## 接入参数
 
