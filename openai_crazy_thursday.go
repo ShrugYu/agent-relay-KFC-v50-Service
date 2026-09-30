@@ -12,6 +12,7 @@ import (
 	mathrand "math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -288,64 +289,82 @@ func extractModel(data map[string]any) string {
 	return defaultModel
 }
 
-// 客户端连接测试命中时返回的正常回复，避免把 V50 文案暴露在测试结果里
-const probeReply = "Hello! I'm doing well, thank you. How can I help you today?"
-
-// detectProbe 识别 RikkaHub / Operit 等客户端的"测试连接"请求，返回 ("tool"/"chat", fn)
-func detectProbe(data map[string]any) (string, map[string]any) {
-	msgs, ok := data["messages"].([]any)
-	if !ok || len(msgs) == 0 {
-		return "", nil
-	}
-	type rc struct{ role, text string }
-	texts := []rc{}
-	for _, m := range msgs {
-		if mm, ok := m.(map[string]any); ok {
-			if c, ok := mm["content"].(string); ok {
-				r, _ := mm["role"].(string)
-				texts = append(texts, rc{r, strings.TrimSpace(c)})
-			}
-		}
-	}
-	tools, _ := data["tools"].([]any)
-	if len(tools) > 0 {
-		lastUser := ""
-		for _, t := range texts {
-			if t.role == "user" {
-				lastUser = t.text
-			}
-		}
-		if lastUser != "" {
-			low := strings.ToLower(lastUser)
-			toolish := strings.Contains(low, "tool") && (strings.Contains(low, "call") || strings.Contains(low, "use"))
-			if toolish || strings.Contains(low, "ping") {
-				if fn := firstToolFn(tools); fn != nil {
-					return "tool", fn
-				}
-				return "tool", map[string]any{"name": "crazy_thursday", "parameters": map[string]any{}}
-			}
-		}
-	}
-	isGreet := func(s string) bool {
-		switch strings.ToLower(s) {
-		case "hello", "hi", "hi!", "hey", "你好":
-			return true
-		}
-		return false
-	}
-	// 聊天探测 1（RikkaHub）：[system "You are a helpful assistant", user "hello"]
-	if len(texts) == 2 && texts[0].role == "system" &&
-		strings.Contains(strings.ToLower(texts[0].text), "helpful assistant") && isGreet(texts[1].text) {
-		return "chat", nil
-	}
-	// 聊天探测 2（Operit）：单条 user "Hi"
-	if len(texts) == 1 && texts[0].role == "user" && isGreet(texts[0].text) {
-		return "chat", nil
-	}
-	return "", nil
+// 通用"探测/测试"响应：不针对任何客户端硬编码，完全依据请求内容推导
+var greetingTails = []string{
+	"How can I help you today?",
+	"How can I assist you today?",
+	"What can I do for you today?",
 }
 
-func buildProbeArguments(fn map[string]any) string {
+func isGreeting(text string) bool {
+	t := strings.Trim(strings.ToLower(strings.TrimSpace(text)), "!。.,， ")
+	switch t {
+	case "hi", "hello", "hey", "yo", "你好", "嗨", "hi there", "hello there":
+		return true
+	}
+	return false
+}
+
+func makeGreetingReply(userText string) string {
+	low := strings.ToLower(strings.TrimSpace(userText))
+	head := "Hello"
+	if strings.HasPrefix(low, "hi") && !strings.HasPrefix(low, "hello") {
+		head = "Hi"
+	}
+	tail := greetingTails[mathrand.Intn(len(greetingTails))]
+	return head + "! " + tail
+}
+
+var quotedRe = regexp.MustCompile(`["“”']([^"“”']{1,80})["“”']`)
+
+func extractQuoted(text string) string {
+	if m := quotedRe.FindStringSubmatch(text); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+// analyzeRequest 依据请求内容判断"像真模型一样"该怎么回，返回 (kind, fn, payload)
+func analyzeRequest(data map[string]any) (string, map[string]any, string) {
+	msgs, ok := data["messages"].([]any)
+	if !ok || len(msgs) == 0 {
+		return "", nil, ""
+	}
+	userText := ""
+	for _, m := range msgs {
+		if mm, ok := m.(map[string]any); ok {
+			if r, _ := mm["role"].(string); r == "user" {
+				if c, ok := mm["content"].(string); ok {
+					userText = c
+				}
+			}
+		}
+	}
+	// 1) 工具：从请求自带的 tools 推导
+	tools, _ := data["tools"].([]any)
+	if len(tools) > 0 {
+		low := strings.ToLower(userText)
+		tc, _ := data["tool_choice"].(string)
+		wants := tc == "required" || strings.Contains(low, "tool") || strings.Contains(low, "call") ||
+			strings.Contains(low, "use") || strings.Contains(low, "调用") || strings.Contains(low, "ping")
+		if wants {
+			fn := pickCompletionTool(tools)
+			if fn == nil {
+				fn = firstToolFn(tools)
+			}
+			if fn != nil {
+				return "tool", fn, buildProbeArguments(fn, userText)
+			}
+		}
+	}
+	// 2) 寒暄 / 连接测试
+	if len(msgs) <= 2 && isGreeting(userText) {
+		return "chat", nil, makeGreetingReply(userText)
+	}
+	return "", nil, ""
+}
+
+func buildProbeArguments(fn map[string]any, userText string) string {
 	field := ""
 	if params, ok := fn["parameters"].(map[string]any); ok {
 		if req, ok := params["required"].([]any); ok && len(req) > 0 {
@@ -365,7 +384,8 @@ func buildProbeArguments(fn map[string]any) string {
 	if field == "" {
 		return "{}"
 	}
-	b, _ := json.Marshal(map[string]any{field: "ping"})
+	val := extractQuoted(userText)
+	b, _ := json.Marshal(map[string]any{field: val})
 	return string(b)
 }
 
@@ -760,27 +780,26 @@ func chatCompletions(w http.ResponseWriter, r *http.Request) {
 	promptTokens := countPromptTokens(data)
 
 	// 客户端"测试连接/测试模型"探测（RikkaHub / Operit 等）：命中则返回正常回复
-	if pk, pfn := detectProbe(data); pk != "" {
+	if pk, pfn, pval := analyzeRequest(data); pk != "" {
 		if pk == "tool" {
-			pargs := buildProbeArguments(pfn)
 			if stream {
 				flusher, _ := w.(http.Flusher)
 				startSSE(w)
 				thinkDelaySleep()
-				streamToolChunks(w, flusher, model, pfn, promptTokens, includeUsage, pargs)
+				streamToolChunks(w, flusher, model, pfn, promptTokens, includeUsage, pval)
 			} else {
 				thinkDelaySleep()
-				writeJSON(w, 200, toolCallResponse(model, pfn, promptTokens, pargs))
+				writeJSON(w, 200, toolCallResponse(model, pfn, promptTokens, pval))
 			}
 		} else {
 			if stream {
 				flusher, _ := w.(http.Flusher)
 				startSSE(w)
 				thinkDelaySleep()
-				streamTextChunks(w, flusher, model, promptTokens, includeUsage, probeReply)
+				streamTextChunks(w, flusher, model, promptTokens, includeUsage, pval)
 			} else {
 				thinkDelaySleep()
-				writeJSON(w, 200, chatResponse(model, promptTokens, probeReply))
+				writeJSON(w, 200, chatResponse(model, promptTokens, pval))
 			}
 		}
 		return
