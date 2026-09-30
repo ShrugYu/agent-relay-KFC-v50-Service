@@ -172,6 +172,10 @@ def make_models_list():
             "object": "model",
             "created": created,
             "owned_by": owner,
+            "name": mid,
+            "display_name": mid,
+            "context_window": 128000,
+            "max_tokens": 8192,
             "permission": [{
                 "id": "modelperm-" + uuid.uuid4().hex[:24],
                 "object": "model_permission",
