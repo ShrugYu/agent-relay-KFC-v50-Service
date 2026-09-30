@@ -91,20 +91,24 @@ func nowUnix() int64 { return time.Now().Unix() }
 type modelInfo struct{ ID, Owner string }
 
 var modelCatalog = []modelInfo{
-	{"deepseek-v4-pro", "deepseek"},
-	{"deepseek-v4-flash", "deepseek"},
-	{"deepseekv4.1-flash", "deepseek"},
+	// Anthropic / Claude（5.5 在前）
 	{"claude-opus-5.5", "anthropic"},
 	{"claude-opus-5.0", "anthropic"},
+	// OpenAI / GPT（6 系 > 5.5 系 > 5.3 系）
 	{"gpt-6-astra", "openai"},
 	{"gpt-6-luna", "openai"},
 	{"gpt-6-sol", "openai"},
 	{"gpt-5.5-sol", "openai"},
-	{"gpt-5.3-codex", "openai"},
 	{"gpt-5.5", "openai"},
+	{"gpt-5.3-codex", "openai"},
+	// Zhipu / GLM（5.3 > 5.3-flash > 5.2）
 	{"glm-5.3", "zhipuai"},
 	{"gml-5.3-flash", "zhipuai"},
 	{"glm-5.2", "zhipuai"},
+	// DeepSeek（4.1 > 4）
+	{"deepseekv4.1-flash", "deepseek"},
+	{"deepseek-v4-pro", "deepseek"},
+	{"deepseek-v4-flash", "deepseek"},
 }
 
 var defaultModel = "gpt-5.5"
