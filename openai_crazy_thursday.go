@@ -303,7 +303,7 @@ var greetingTails = []string{
 func isGreeting(text string) bool {
 	t := strings.Trim(strings.ToLower(strings.TrimSpace(text)), "!。.,， ")
 	switch t {
-	case "hi", "hello", "hey", "yo", "你好", "嗨", "hi there", "hello there":
+	case "hi", "hello", "hey", "yo", "hi there", "hello there":
 		return true
 	}
 	return false
