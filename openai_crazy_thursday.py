@@ -17,9 +17,10 @@ import random
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-HOST = "127.0.0.1"
-PORT = 8788
-BASE_URL = f"http://{HOST}:{PORT}"
+HOST = os.environ.get("CT_HOST", "127.0.0.1")
+PORT = int(os.environ.get("CT_PORT", "8788"))
+# 对外可访问地址：部署到服务器时设成你的公网 IP / 域名（决定响应里图片链接指向哪里）
+BASE_URL = os.environ.get("CT_BASE_URL", f"http://{HOST}:{PORT}")
 
 CREATOR = "疯狂星期四株式会社"
 PLAIN_ANSWER = "今天疯狂星期四v我50！"
