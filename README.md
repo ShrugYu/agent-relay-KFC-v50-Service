@@ -100,4 +100,4 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 - 响应头带 `X-Request-Id`、`OpenAI-Version`、`OpenAI-Processing-Ms`、`X-RateLimit-*`；`Server` 头不泄露语言 / 版本
 - 全量 CORS（含 `OPTIONS` 预检）
 
-— 沈屿 · 疯狂星期四株式会社
+— 肯德基 · 疯狂星期四株式会社
