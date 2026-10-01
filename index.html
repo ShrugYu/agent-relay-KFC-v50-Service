@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>疯狂星期四中转站 · KFC v50</title>
+<style>
+  :root{
+    --bg:#0f0e17; --card:#1a1a2e; --line:#2a2a45;
+    --gold:#ffd700; --blue:#7dd3fc; --muted:#8892b0; --text:#eee;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--text);line-height:1.7;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    padding:0 16px;
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:32px 0 64px}
+  header{text-align:center;padding:24px 0 8px}
+  header h1{font-size:28px;font-weight:800;letter-spacing:1px}
+  header .sub{color:var(--muted);margin-top:8px;font-size:15px}
+  .badges{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .badge{
+    display:inline-block;padding:4px 12px;border-radius:20px;font-size:13px;
+    background:#ffd70022;color:var(--gold);border:1px solid #ffd70055;
+  }
+  .badge.b{background:#7dd3fc22;color:var(--blue);border-color:#7dd3fc55}
+  .hero{
+    background:var(--card);border:1px solid var(--line);border-radius:18px;
+    padding:28px 24px;margin:24px 0;text-align:center;
+    box-shadow:0 12px 40px rgba(0,0,0,.45);
+  }
+  .hero img{max-width:260px;width:100%;border-radius:12px;border:1px solid #ffd70033}
+  .v50{font-size:clamp(26px,6vw,40px);font-weight:900;color:var(--gold);letter-spacing:2px;margin-top:16px}
+  .hero p{color:var(--muted);margin-top:10px;font-size:15px}
+  section{margin:28px 0}
+  section h2{font-size:19px;margin-bottom:14px;color:var(--gold)}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:18px 20px;
+  }
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;width:38%}
+  tr:last-child td{border-bottom:none}
+  code{
+    background:#0f3460;color:var(--blue);padding:2px 7px;border-radius:6px;
+    font-size:13px;word-break:break-all;
+  }
+  pre{
+    background:#0d0d1a;border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;overflow-x:auto;font-size:13px;color:#c9d1d9;
+  }
+  .models{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .models .g{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .models .g h3{font-size:14px;color:var(--blue);margin-bottom:8px}
+  .models .g .m{font-size:13.5px;color:var(--text);padding:2px 0}
+  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .features .f{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .features .f b{color:var(--gold)}
+  .features .f span{display:block;color:var(--muted);font-size:13.5px;margin-top:6px}
+  footer{text-align:center;color:var(--muted);font-size:13px;margin-top:40px;padding-top:20px;border-top:1px solid var(--line)}
+  a{color:var(--blue)}
+  @media(max-width:520px){ .wrap{padding:20px 0 48px} header h1{font-size:23px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>🍗 疯狂星期四中转站</h1>
+    <div class="sub">Agent AI 中转站 · OpenAI 兼容聚合网关</div>
+    <div class="badges">
+      <span class="badge">OpenAI 兼容</span>
+      <span class="badge b">Python + Go</span>
+      <span class="badge">KFC v50</span>
+      <span class="badge b">零依赖</span>
+    </div>
+  </header>
+
+  <div class="hero">
+    <img src="KFC疯狂星期四.png" alt="疯狂星期四">
+    <div class="v50">今天疯狂星期四<br>v我50！</div>
+    <p>不管你说什么，它都只想跟你要 50。</p>
+    <p>但看起来，就是一个正常的 OpenAI 兼容聚合中转站。</p>
+  </div>
+
+  <section>
+    <h2>接入参数</h2>
+    <div class="card">
+      <table>
+        <tr><th>BaseURL</th><td><code>http://&lt;你的地址&gt;:8788/v1</code>（不带 <code>/v1</code> 也行）</td></tr>
+        <tr><th>API Key</th><td>任意（服务不校验）</td></tr>
+        <tr><th>Model</th><td>下方 14 个之一（默认 <code>gpt-5.5</code>）</td></tr>
+        <tr><th>协议</th><td>OpenAI Chat Completions / Responses</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>模型列表（14 个）</h2>
+    <div class="models">
+      <div class="g"><h3>Anthropic / Claude</h3>
+        <div class="m">claude-opus-5.5</div><div class="m">claude-opus-5.0</div></div>
+      <div class="g"><h3>OpenAI / GPT</h3>
+        <div class="m">gpt-6-astra</div><div class="m">gpt-6-luna</div><div class="m">gpt-6-sol</div>
+        <div class="m">gpt-5.5-sol</div><div class="m">gpt-5.5</div><div class="m">gpt-5.3-codex</div></div>
+      <div class="g"><h3>Zhipu / GLM</h3>
+        <div class="m">glm-5.3</div><div class="m">gml-5.3-flash</div><div class="m">glm-5.2</div></div>
+      <div class="g"><h3>DeepSeek</h3>
+        <div class="m">deepseekv4.1-flash</div><div class="m">deepseek-v4-pro</div><div class="m">deepseek-v4-flash</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>它有多"真"</h2>
+    <div class="features">
+      <div class="f"><b>完整 OpenAI 协议</b><span>/v1/models、chat/completions（含 SSE 流式）、completions、embeddings、responses、moderations、billing、/api/status</span></div>
+      <div class="f"><b>拟真时序</b><span>先"思考"约 1.5 秒，再按 token 分段逐段吐字，像真模型一样慢慢输出</span></div>
+      <div class="f"><b>工具调用</b><span>请求点名工具时返回合法 tool_calls，能过 Cline / RikkaHub / Operit 等工具能力测试</span></div>
+      <div class="f"><b>过客户端探测</b><span>RikkaHub / Operit 的"测试连接"会得到正常回复；dsh 保存配置的 /models 探测也能通过</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>快速开始</h2>
+    <pre>git clone https://github.com/ShrugYu/agent-relay-KFC-v50-Service.git
+cd agent-relay-KFC-v50-Service
+python3 openai_crazy_thursday.py      # Python 版
+# 或
+go build -o kfcgo . &amp;&amp; ./kfcgo        # Go 版
+
+# 默认监听 127.0.0.1:8788
+curl http://127.0.0.1:8788/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.5","messages":[{"role":"user","content":"你好"}]}'</pre>
+  </section>
+
+  <section>
+    <h2>部署到服务器</h2>
+    <div class="card">
+      完整的域名 + HTTPS 部署教程（systemd、Nginx 反代、certbot）见仓库里的
+      <a href="https://github.com/ShrugYu/agent-relay-KFC-v50-Service/blob/main/DEPLOY.md">DEPLOY.md</a>。
+    </div>
+  </section>
+
+  <footer>
+    项目地址：<a href="https://github.com/ShrugYu/agent-relay-KFC-v50-Service">github.com/ShrugYu/agent-relay-KFC-v50-Service</a><br>
+    — 沈屿 · 疯狂星期四株式会社 · V我50！
+  </footer>
+
+</div>
+</body>
+</html>
