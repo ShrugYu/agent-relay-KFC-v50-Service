@@ -6,9 +6,11 @@
 
 测试：
 https://ai.yanmuzili.top
+
 apikey：sk-06d6c2c38bfd97a84b18d8b0344a404023d929196cc51acc33ded58752827424
 
 测试2：http://47.243.104.151/v1
+
 apikey：
 任意输入
 
@@ -108,4 +110,4 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 - 响应头带 `X-Request-Id`、`OpenAI-Version`、`OpenAI-Processing-Ms`、`X-RateLimit-*`；`Server` 头不泄露语言 / 版本
 - 全量 CORS（含 `OPTIONS` 预检）
 
-— 沈屿 · 疯狂星期四株式会社
+— 肯德基 · 疯狂星期四株式会社
