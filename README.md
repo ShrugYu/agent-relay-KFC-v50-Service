@@ -4,6 +4,14 @@
 
 对外表现为一个真实的 OpenAI 兼容聚合中转站（new-api / one-api 风格），可直接被任意 OpenAI 兼容客户端 / agent（Cursor、Cline、Cherry Studio、NextChat、LiteLLM、DSH 等）当作正常模型使用。**在"还没发消息"的探测阶段就会被识别为真实可用的中转站。**
 
+测试：
+https://ai.yanmuzili.top
+apikey：sk-06d6c2c38bfd97a84b18d8b0344a404023d929196cc51acc33ded58752827424
+
+测试2：http://47.243.104.151/v1
+apikey：
+任意输入
+
 ## 运行
 
 ```bash
