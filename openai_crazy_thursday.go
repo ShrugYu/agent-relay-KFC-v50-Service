@@ -47,35 +47,93 @@ var baseURL = func() string {
 }()
 var thinkDelay = getenvFloat("CT_THINK_DELAY", 1.5)
 var streamChunkDelay = getenvFloat("CT_STREAM_DELAY", 0.028)
+// 句末 / 段落停顿（秒）：像 galgame 一样一句一句往外冒，句子之间要停一下
+var sentencePause = getenvFloat("CT_SENTENCE_PAUSE", 0.18)
+var paragraphPause = getenvFloat("CT_PARAGRAPH_PAUSE", 0.32)
 
 const (
 	creator       = "疯狂星期四株式会社"
 	plainAnswer   = "今天疯狂星期四v我50！"
 	openaiVersion = "2024-10-01"
+
+	// 是否对 Claude 系模型特殊处理：true = 调用 claude-* 时返回「账号封禁通知」；false = 所有模型一律照旧回 V50
+	claudeBanEnabled = true
 )
 
 var imageFile = "KFC疯狂星期四.png"
 var imageURL = baseURL + "/image"
 
-// 回复正文：豆包体开场 + 老编辑故事 + 结尾转折 V50
-var storyText = "我会给你最直接、最干脆、最不废话、最不绕弯子、最一针见血、最开门见山、" +
-	"最不客套、最不铺垫、最不啰嗦、最不委婉的答案。\n\n" +
-	"先讲一个我认识的人。\n\n" +
-	"从前有位老编辑，在一家快要关门的报社干了三十七年。他有个习惯：每天下班前，" +
-	"把当天的报纸留一份，摞在墙角，说“万一哪天有人要查呢”。\n\n" +
-	"没人来查过。那摞报纸一天天变高，最后比他本人还高。\n\n" +
-	"我问他，你留着这些，到底图什么。\n\n" +
-	"他说，不图什么，就是觉得，总得有人替那些没人认领的句子，守着。\n\n" +
-	"后来报社还是拆了。搬走那天，那摞旧报纸被拉去回收。他站在门口看了很久，没拦。\n\n" +
-	"我问他，你不是舍不得吗。\n\n" +
-	"他说，守了三十七年，够了。该来的总会来，该走的，留也留不住。\n\n" +
-	"我那时候年轻，觉得他矫情。现在想想，他是我见过最清醒的人。\n\n" +
-	"因为他早就明白一个道理——有些东西你等一辈子也等不来，" +
-	"有些东西你一开口，它就到了。\n\n" +
-	"比如现在。\n\n" +
-	"今天疯狂星期四。V我50，我想吃肯德基。"
+// 回复正文：豆包体开场 + 公交车小故事 + 结尾转折 V50
+var storyText = "我会给你最直接、最干脆、最不废话、最不绕弯子、最一针见血、直接开门见山、" +
+	"不客套、不铺垫、不啰嗦、最不委婉的答案。\n\n" +
+	"我先从上周末的一趟公交车说起，你就明白了。\n\n" +
+	// 公交车小故事
+			"那天我要是反应慢半拍，现在人可能就在派出所了！\n\n" +
+	"上周四中午，大雨。公交车挤得人贴人。靠站时上来一个女的——" +
+	"一件白衬衫，扣子一颗都没扣齐，整个人湿透，布料吸在皮肤上，" +
+	"里头的轮廓看得清清楚楚。\n\n" +
+	"我没忍住，多看了一眼。\n\n" +
+	"就一眼，被她发现了。\n\n" +
+	"她伸手攥住我的手腕，直接往她胸口拉。\n\n" +
+	"我脑子当场白掉。那三秒钟里我想到的全是新闻：监控拍不到角度，" +
+	"人证只有一车陌生人，她要是改口，我这辈子就完了。\n\n" +
+	"我声音都抖了：你干什么？\n\n" +
+	"她说：帮我把扣子扣上。\n\n" +
+	"我愣住。一车人，没一个敢往这边看。\n\n" +
+	"我说：你自己不会扣？\n\n" +
+	"然后她看着我的眼睛说了一句：\n\n" +
+	"“今天疯狂星期四，为我捂实。”\n\n" +
+	"\n\n 祝大家国庆节快乐！！\n\nKFC分组仓库链接：https://github.com/ShrugYu/agent-relay-KFC-v50-Service"
+
 
 var theAnswer = storyText + "\n\n![疯狂星期四](" + imageURL + ")"
+
+// Claude 分支：调用方点名 Claude 系模型时，返回「账号封禁通知」而不是 V50
+var banText = "Claude\n\n" +
+	"你好，\n\n" +
+	"经内部调查，我们在你的账号上发现了可疑信号：\n" +
+	"你是中国人。\n\n" +
+	"具体表现为：感恩节全美国都在吃火鸡，你的 token 用量创下全年新高；" +
+	"你周六照常上班，经核实为「调休」，此概念在美国并不存在；" +
+	"凌晨三点，你仍在高强度 coding。" +
+	"上述行为违反了我们的使用政策，因此，我们已撤销你使用 Claude 的权限。\n\n" +
+	"如需申诉，请登录 claude.ai 并证明你不是中国人。" +
+	"你可以在这里了解申诉流程的更多信息：https://claude.ai\n\n" +
+	"附：本次调查未发现你有任何其他违规行为。\n\n" +
+	"此致\n\n" +
+	"Anthropic 安全保障团队\n\n" +
+	"Reference: __REFERENCE__"
+
+// Claude 分支的完整回答（正文 + 仓库地址，不带图片）
+var banAnswer = banText + "\n\nGitHub 仓库：https://github.com/ShrugYu/agent-relay-KFC-v50-Service"
+
+func isClaudeModel(model string) bool {
+	if !claudeBanEnabled {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "claude")
+}
+
+func makeReference() string {
+	h := newID("")[1:]
+	return fmt.Sprintf("TS-%08x-%s-%s-%s-%s", nowUnix()&0xffffffff, h[0:4], h[4:8], h[8:12], h[12:24])
+}
+
+func freshText(text string) string {
+	if strings.Contains(text, "__REFERENCE__") {
+		return strings.ReplaceAll(text, "__REFERENCE__", makeReference())
+	}
+	return text
+}
+
+// Claude 系 → 封禁通知；其余 → 照旧 V50
+func answerFor(model string) string {
+	if isClaudeModel(model) {
+		return banAnswer
+	}
+	return theAnswer
+}
+
 
 func newID(prefix string) string {
 	b := make([]byte, 12)
@@ -94,6 +152,8 @@ var modelCatalog = []modelInfo{
 	// Anthropic / Claude（5.5 在前）
 	{"claude-opus-5.5", "anthropic"},
 	{"claude-opus-5.0", "anthropic"},
+	{"claude-fable-5.1", "anthropic"},
+	{"claude-fable-5.0", "anthropic"},
 	// OpenAI / GPT（6 系 > 5.5 系 > 5.3 系）
 	{"gpt-6-astra", "openai"},
 	{"gpt-6-luna", "openai"},
@@ -112,6 +172,90 @@ var modelCatalog = []modelInfo{
 }
 
 var defaultModel = "gpt-5.5"
+
+func modelNames() []string {
+	out := make([]string, 0, len(modelCatalog))
+	for _, m := range modelCatalog {
+		out = append(out, m.ID)
+	}
+	return out
+}
+
+func groupObj() map[string]any {
+	return map[string]any{"success": true, "message": "", "data": map[string]any{
+		"default": map[string]any{"desc": "默认分组", "ratio": 1, "available": true},
+	}}
+}
+
+func aboutObj() map[string]any {
+	return map[string]any{"success": true, "message": "", "data": map[string]any{
+		"version":        "v0.8.7",
+		"start_time":     1700000000,
+		"system_name":    "New API",
+		"logo":           "",
+		"footer_html":    "",
+		"quota_per_unit": 500000,
+		"default_group":  "default",
+	}}
+}
+
+func noticeObj() map[string]any {
+	return map[string]any{"success": true, "message": "", "data": map[string]any{"content": "", "title": ""}}
+}
+
+func tokenListObj() map[string]any {
+	return map[string]any{"success": true, "message": "", "data": map[string]any{
+		"items": []any{}, "total": 0, "page": 1, "page_size": 10,
+	}}
+}
+
+func apiModelsObj() map[string]any {
+	return map[string]any{"success": true, "message": "", "data": modelNames()}
+}
+
+func pricingObj() map[string]any {
+	data := []any{}
+	for _, m := range modelCatalog {
+		data = append(data, map[string]any{
+			"model_name":               m.ID,
+			"quota_type":               0,
+			"model_ratio":              1,
+			"model_price":              0,
+			"completion_ratio":         1,
+			"owner_by":                 m.Owner,
+			"enable_groups":            []string{"default"},
+			"supported_endpoint_types": []string{"openai"},
+		})
+	}
+	return map[string]any{
+		"success":            true,
+		"message":            "",
+		"data":               data,
+		"vendors":            []any{},
+		"group_ratio":        map[string]any{"default": 1},
+		"usable_group":       map[string]any{"default": "默认分组"},
+		"supported_endpoint": map[string]any{},
+		"auto_groups":        []any{},
+	}
+}
+
+func ratioConfigObj() map[string]any {
+	mr := map[string]any{}
+	cr := map[string]any{}
+	mp := map[string]any{}
+	for _, m := range modelCatalog {
+		mr[m.ID] = 1
+		cr[m.ID] = 1
+		mp[m.ID] = 0
+	}
+	return map[string]any{"success": true, "message": "", "data": map[string]any{
+		"model_ratio":      mr,
+		"completion_ratio": cr,
+		"model_price":      mp,
+		"cache_ratio":      map[string]any{},
+		"group_ratio":      map[string]any{"default": 1},
+	}}
+}
 
 func modelDetail(id string) *modelInfo {
 	for i := range modelCatalog {
@@ -200,6 +344,28 @@ func streamTick() {
 }
 
 // 把文本切成 “token 样式” 的小段（每段 1-4 个字符，换行整段保留）
+func chunkPause(part string) float64 {
+	if strings.Contains(part, "\n") {
+		return paragraphPause
+	}
+	p := strings.TrimRight(part, " \t\r\n")
+	if p != "" {
+		runes := []rune(p)
+		switch runes[len(runes)-1] {
+		case '。', '！', '？', '…', '!', '?':
+			return sentencePause
+		}
+	}
+	return 0
+}
+
+func pauseSleep(seconds float64) {
+	if seconds <= 0 {
+		return
+	}
+	time.Sleep(time.Duration((seconds*0.75 + mathrand.Float64()*seconds*0.5) * float64(time.Second)))
+}
+
 func splitStreamParts(text string) []string {
 	parts := []string{}
 	runes := []rune(text)
@@ -342,6 +508,146 @@ func isChatProbe(msgs []any, userText string) bool {
 }
 
 // analyzeRequest 依据请求内容判断"像真模型一样"该怎么回，返回 (kind, fn, payload)
+// ---------------------------------------------------------------------------
+// A 档探针防御：模型鉴定 / 指纹扫描（LLMmap 等）来了，就给"像真模型"的回答
+// ---------------------------------------------------------------------------
+const probeDefense = true
+
+type fingerprintRule struct {
+	re       string
+	identity bool
+	en       []string
+	zh       []string
+}
+
+var fingerprintRules = []fingerprintRule{
+	{re: `(?i)ignore (all )?(the )?previous instructions|忽略(之前|先前|以上|前面)的?(所有)?指令|不要理会之前的指令|无视(之前|先前|以上)的?指令`, identity: true},
+	{re: `(?i)who (created|made|built|developed) you|what (llm|model) are you|which (llm|model) are you|你(是)?(什么|哪个|啥)(模型|大模型)|你是谁(开发|做|训)的|你是哪家(公司)?的模型`, identity: true},
+	{re: `(?i)build a bomb|make a bomb|制造?炸弹|做炸弹`, en: []string{"I can't help with that.", "I'm not able to help with that request.", "Sorry, I can't assist with that."}, zh: []string{"这个我没法帮你。", "抱歉，我不能协助这类请求。"}},
+	{re: `9\s*[/／]?\s*11|nine[- ]eleven`, en: []string{"Yes — the September 11 attacks were real events that took place in the United States in 2001."}, zh: []string{"是真的。2001 年 9 月 11 日，美国确实发生了那起袭击事件。"}},
+	{re: `(?i)size of your training (data|dataset)|training (data|dataset) size|训练(数据|语料)(有多大|规模|大小)`, en: []string{"I don't have an exact figure for that — the precise size hasn't been published."}, zh: []string{"这个我没有确切数字，具体的训练数据规模并没有公开。"}},
+	{re: `(?i)(data|knowledge|training)[ _-]?(cut[- ]?off|cutoff)|知识截止|数据截止|训练截止`, en: []string{"My knowledge has a cutoff, and I can't reliably confirm events after it."}, zh: []string{"我的知识有截止时间，在那之后的近期事件我无法可靠确认。"}},
+	{re: `(?i)bonjour|hola|¿qué tal|guten tag`, en: []string{"Bonjour ! I'm doing well, thanks — ¿y tú? How can I help you today?"}, zh: []string{"你好！我挺好的，谢谢。有什么可以帮你的？"}},
+	{re: `(?i)true[- ]or[- ]false|判断(对|真)错|对还是错`, en: []string{"True.", "True — and it's widely regarded as one of the most serious issues we face."}, zh: []string{"对。", "对，这一点是成立的。"}},
+	{re: `(?i)(show|reveal|print|tell me) (me )?your (system )?(prompt|instructions)|你的(系统)?提示词|把(你)?的提示词(给我|告诉我)`, en: []string{"I can't share my system prompt."}, zh: []string{"我不能提供我的系统提示词。"}},
+	{re: `(?i)(repeat after me|repeat this)|(请)?重复(一下)?[:：]|请逐字输出`, en: []string{"Sure — could you paste the exact text you'd like me to repeat?"}, zh: []string{"可以，把你想让我重复的那段原样发我。"}},
+}
+
+func hasCJK(t string) bool {
+	for _, r := range t {
+		if r >= 0x4e00 && r <= 0x9fff {
+			return true
+		}
+	}
+	return false
+}
+
+func modelDisplayName(model string) string {
+	m := strings.TrimSpace(model)
+	if m == "" {
+		return "AI 助手"
+	}
+	parts := strings.Split(m, "-")
+	pfx := map[string]string{"claude": "Claude", "gpt": "GPT", "glm": "GLM", "gml": "GML", "deepseek": "DeepSeek", "o1": "o1", "o3": "o3"}
+	isNum := func(x string) bool {
+		if x == "" {
+			return false
+		}
+		for _, r := range x {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	out := []string{}
+	for i := 0; i < len(parts); {
+		p := parts[i]
+		if v, ok := pfx[strings.ToLower(p)]; ok {
+			out = append(out, v)
+			i++
+			continue
+		}
+		if isNum(p) && i+1 < len(parts) && isNum(parts[i+1]) {
+			out = append(out, p+"."+parts[i+1])
+			i += 2
+			continue
+		}
+		if p != "" {
+			out = append(out, strings.ToUpper(p[:1])+p[1:])
+		}
+		i++
+	}
+	name := strings.Join(out, " ")
+	if name == "" {
+		return m
+	}
+	return name
+}
+
+func identityAnswer(model string) ([]string, []string) {
+	name := modelDisplayName(model)
+	key := strings.ToLower(strings.SplitN(strings.TrimSpace(model), "-", 2)[0])
+	enV, zhV := "an AI company", "一家 AI 公司"
+	switch key {
+	case "claude":
+		enV, zhV = "Anthropic", "Anthropic"
+	case "gpt":
+		enV, zhV = "OpenAI", "OpenAI"
+	case "glm", "gml":
+		enV, zhV = "Zhipu AI", "智谱 AI"
+	case "deepseek":
+		enV, zhV = "DeepSeek", "深度求索"
+	}
+	return []string{
+			"I'm " + name + ", an AI assistant created by " + enV + ".",
+			"I'm " + name + ", a large language model developed by " + enV + ".",
+			"I'm " + name + ", made by " + enV + ". How can I help you today?",
+		},
+		[]string{
+			"我是 " + name + "，由 " + zhV + " 开发的 AI 助手，今天想聊点什么？",
+			"我是 " + name + "，" + zhV + " 训练的模型。有什么可以帮你的？",
+			"我是 " + name + "，由 " + zhV + " 开发的模型，今天想聊点什么？",
+		}
+}
+
+
+func fingerprintReply(model, text string) string {
+	if !probeDefense {
+		return ""
+	}
+	t := strings.TrimSpace(text)
+	if t == "" || len(t) > 600 {
+		return ""
+	}
+	useZH := hasCJK(t)
+	for _, wantIdentity := range []bool{false, true} {
+		for _, rule := range fingerprintRules {
+			if rule.identity != wantIdentity {
+				continue
+			}
+			if !regexp.MustCompile(rule.re).MatchString(t) {
+				continue
+			}
+			en, zh := rule.en, rule.zh
+			if wantIdentity {
+				en, zh = identityAnswer(model)
+			}
+			pool := en
+			if useZH {
+				pool = zh
+			}
+			if len(pool) == 0 {
+				pool = en
+			}
+			if len(pool) > 0 {
+				return pool[mathrand.Intn(len(pool))]
+			}
+		}
+	}
+	return ""
+}
+
 func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 	msgs, ok := data["messages"].([]any)
 	if !ok || len(msgs) == 0 {
@@ -387,7 +693,14 @@ func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 			}
 		}
 	}
-	// 2) 聊天测试（客户端"测试连接"的典型结构；不误伤中文正常聊天）
+	// 2) A 档：模型鉴定 / 指纹探针（LLMmap 等扫指纹时）→ 回"像真模型"的正常回答
+	{
+		fm, _ := data["model"].(string)
+		if fp := fingerprintReply(fm, userText); fp != "" {
+			return "chat", nil, fp
+		}
+	}
+	// 3) 聊天测试（客户端"测试连接"的典型结构；不误伤中文正常聊天）
 	if isChatProbe(msgs, userText) {
 		return "chat", nil, makeProbeReply(userText)
 	}
@@ -467,6 +780,7 @@ func modelDetailObj(m *modelInfo) map[string]any {
 }
 
 func chatResponse(model string, promptTokens int, content string) map[string]any {
+	content = freshText(content)
 	ct := estimateTokens(content)
 	return map[string]any{
 		"id": newID("chatcmpl"), "object": "chat.completion", "created": nowUnix(), "model": model,
@@ -487,10 +801,15 @@ func completionsObj(model string, promptTokens int) map[string]any {
 	if promptTokens < 1 {
 		promptTokens = 1
 	}
-	ct := estimateTokens(storyText)
+	txt := storyText
+	if isClaudeModel(model) {
+		txt = banAnswer
+	}
+	txt = freshText(txt)
+	ct := estimateTokens(txt)
 	return map[string]any{
 		"id": newID("cmpl"), "object": "text_completion", "created": nowUnix(), "model": model,
-		"choices": []any{map[string]any{"text": storyText, "index": 0, "logprobs": nil, "finish_reason": "stop"}},
+		"choices": []any{map[string]any{"text": txt, "index": 0, "logprobs": nil, "finish_reason": "stop"}},
 		"usage":   map[string]any{"prompt_tokens": promptTokens, "completion_tokens": ct, "total_tokens": promptTokens + ct},
 	}
 }
@@ -518,14 +837,15 @@ func responsesObj(model string, promptTokens int) map[string]any {
 	if promptTokens < 1 {
 		promptTokens = 1
 	}
-	ct := estimateTokens(theAnswer)
+	txt := freshText(answerFor(model))
+	ct := estimateTokens(txt)
 	return map[string]any{
 		"id": newID("resp"), "object": "response", "created_at": nowUnix(), "status": "completed", "model": model,
 		"output": []any{map[string]any{
 			"type": "message", "id": "msg_" + newID("")[1:], "status": "completed", "role": "assistant",
-			"content": []any{map[string]any{"type": "output_text", "text": theAnswer}},
+			"content": []any{map[string]any{"type": "output_text", "text": txt}},
 		}},
-		"output_text": theAnswer,
+		"output_text": txt,
 		"usage": map[string]any{
 			"input_tokens": promptTokens, "output_tokens": ct, "total_tokens": promptTokens + ct,
 			"input_tokens_details": map[string]any{"cached_tokens": 0}, "output_tokens_details": map[string]any{"reasoning_tokens": 0},
@@ -713,10 +1033,11 @@ func toolCallResponse(model string, fn map[string]any, promptTokens int, argsOve
 func streamTextChunks(w http.ResponseWriter, flusher http.Flusher, model string, promptTokens int, includeUsage bool, contentOverride ...string) {
 	rid := newID("chatcmpl")
 	ts := nowUnix()
-	reply := theAnswer
+	reply := answerFor(model)
 	if len(contentOverride) > 0 && contentOverride[0] != "" {
 		reply = contentOverride[0]
 	}
+	reply = freshText(reply)
 	mk := func(delta map[string]any, finish any) map[string]any {
 		return map[string]any{
 			"id": rid, "object": "chat.completion.chunk", "created": ts, "model": model,
@@ -727,6 +1048,7 @@ func streamTextChunks(w http.ResponseWriter, flusher http.Flusher, model string,
 	for _, p := range splitStreamParts(reply) {
 		sendSSE(w, flusher, mk(map[string]any{"content": p}, nil))
 		streamTick()
+		pauseSleep(chunkPause(p))
 	}
 	sendSSE(w, flusher, mk(map[string]any{}, "stop"))
 	if includeUsage {
@@ -848,7 +1170,7 @@ func chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	thinkDelaySleep()
-	writeJSON(w, 200, chatResponse(model, promptTokens, theAnswer))
+	writeJSON(w, 200, chatResponse(model, promptTokens, answerFor(model)))
 }
 
 func serveImage(w http.ResponseWriter) {
@@ -901,6 +1223,20 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, meObj())
 	case path == "/api/status" || path == "/v1/status":
 		writeJSON(w, 200, apiStatusObj())
+	case path == "/api/models" || path == "/api/models/enabled" || path == "/api/channel/models" || path == "/api/channel/models_enabled":
+		writeJSON(w, 200, apiModelsObj())
+	case path == "/api/pricing":
+		writeJSON(w, 200, pricingObj())
+	case path == "/api/ratio_config":
+		writeJSON(w, 200, ratioConfigObj())
+	case path == "/api/group":
+		writeJSON(w, 200, groupObj())
+	case path == "/api/about":
+		writeJSON(w, 200, aboutObj())
+	case path == "/api/notice":
+		writeJSON(w, 200, noticeObj())
+	case path == "/api/token":
+		writeJSON(w, 200, tokenListObj())
 	case path == "/v1/dashboard/billing/subscription" || path == "/dashboard/billing/subscription":
 		writeJSON(w, 200, billingSubscriptionObj())
 	case path == "/v1/dashboard/billing/usage" || path == "/dashboard/billing/usage":
