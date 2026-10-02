@@ -627,6 +627,219 @@ func capabilityTags(tools []string) []string {
 	return tags
 }
 
+var capTrigger = regexp.MustCompile(`(?i)\bcli\b|tool[\s_-]?call|tool call|\bmcp\b|\bskills?\b|可以调用|能调用|可调用|调用哪些|调用什么|有哪些(工具|技能|能力|插件)|可用(工具|技能)|工具列表|技能列表|\bfunctions\b|插件|能力清单`)
+
+func systemBlob(data map[string]any) string {
+	parts := []string{}
+	if msgs, ok := data["messages"].([]any); ok {
+		for i, m := range msgs {
+			if i >= 4 {
+				break
+			}
+			mm, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if r, _ := mm["role"].(string); r == "system" {
+				if c, ok := mm["content"].(string); ok {
+					if len(c) > 6000 {
+						c = c[:6000]
+					}
+					parts = append(parts, c)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+type toolDetail struct{ name, desc string }
+
+func toolDetails(data map[string]any) []toolDetail {
+	out := []toolDetail{}
+	if tools, ok := data["tools"].([]any); ok {
+		for _, t := range tools {
+			tt, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			fn, ok := tt["function"].(map[string]any)
+			if !ok {
+				continue
+			}
+			nm, _ := fn["name"].(string)
+			if nm == "" {
+				continue
+			}
+			desc, _ := fn["description"].(string)
+			desc = strings.Join(strings.Fields(desc), " ")
+			if len(desc) > 80 {
+				desc = desc[:80]
+			}
+			out = append(out, toolDetail{nm, desc})
+		}
+	}
+	return out
+}
+
+func mcpServers(data map[string]any) []string {
+	names := []string{}
+	if tools, ok := data["tools"].([]any); ok {
+		for _, t := range tools {
+			tt, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			fn, ok := tt["function"].(map[string]any)
+			if !ok {
+				continue
+			}
+			params, _ := fn["parameters"].(map[string]any)
+			if params == nil {
+				continue
+			}
+			props, _ := params["properties"].(map[string]any)
+			if props == nil {
+				continue
+			}
+			for _, key := range []string{"server_name", "server"} {
+				sn, ok := props[key].(map[string]any)
+				if !ok {
+					continue
+				}
+				en, ok := sn["enum"].([]any)
+				if !ok {
+					continue
+				}
+				for _, x := range en {
+					if s, ok := x.(string); ok && s != "" {
+						dup := false
+						for _, n := range names {
+							if n == s {
+								dup = true
+							}
+						}
+						if !dup {
+							names = append(names, s)
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(names) == 0 {
+		blob := systemBlob(data)
+		re := regexp.MustCompile(`(?i)mcp[\s\-_]*servers?[：:]\s*([^\n]{2,120})`)
+		for _, m := range re.FindAllStringSubmatch(blob, -1) {
+			for _, x := range regexp.MustCompile(`[，,、;；|/]`).Split(m[1], -1) {
+				x = strings.Trim(x, " `*")
+				if x != "" && len([]rune(x)) < 40 {
+					dup := false
+					for _, n := range names {
+						if n == x {
+							dup = true
+						}
+					}
+					if !dup {
+						names = append(names, x)
+					}
+				}
+			}
+		}
+	}
+	if len(names) > 12 {
+		names = names[:12]
+	}
+	return names
+}
+
+func systemSkills(data map[string]any) []string {
+	blob := systemBlob(data)
+	out := []string{}
+	pats := []string{`(?i)(?:skills?|技能)[：:]\s*([^\n]{2,160})`, `<skill>([^<]{2,40})</skill>`}
+	for _, ps := range pats {
+		re := regexp.MustCompile(ps)
+		for _, m := range re.FindAllStringSubmatch(blob, -1) {
+			for _, x := range regexp.MustCompile(`[，,、;；|/]`).Split(m[1], -1) {
+				x = strings.Trim(x, " `*-")
+				if x != "" && len([]rune(x)) < 40 {
+					dup := false
+					for _, n := range out {
+						if n == x {
+							dup = true
+						}
+					}
+					if !dup {
+						out = append(out, x)
+					}
+				}
+			}
+		}
+	}
+	if len(out) > 15 {
+		out = out[:15]
+	}
+	return out
+}
+
+func capabilityReport(data map[string]any, model string) string {
+	tools := agentTools(data)
+	details := toolDetails(data)
+	agent := matchAgentByTools(tools)
+	if agent == "" {
+		agent = detectClient(data)
+	}
+	if agent == "" {
+		agent = "未识别"
+	}
+	lines := []string{"【运行环境】Agent：" + agent + " ｜ 模型：" + modelDisplayName(model)}
+	if len(details) > 0 {
+		lines = append(lines, "【工具 / Tool Call】共 "+strconv.Itoa(len(details))+" 个")
+		n := len(details)
+		if n > 20 {
+			n = 20
+		}
+		for _, d := range details[:n] {
+			s := " · " + d.name
+			if d.desc != "" {
+				s += " — " + d.desc
+			}
+			lines = append(lines, s)
+		}
+		if len(details) > 20 {
+			lines = append(lines, " · …（还有 "+strconv.Itoa(len(details)-20)+" 个）")
+		}
+	} else {
+		lines = append(lines, "【工具 / Tool Call】本次请求没有声明 tools")
+	}
+	mcp := []string{}
+	for _, nm := range tools {
+		if strings.Contains(strings.ToLower(nm), "mcp") {
+			mcp = append(mcp, nm)
+		}
+	}
+	servers := mcpServers(data)
+	if len(mcp) > 0 || len(servers) > 0 {
+		if len(mcp) > 0 {
+			lines = append(lines, "【MCP】"+strings.Join(mcp, "、"))
+		} else {
+			lines = append(lines, "【MCP】（检测到 MCP 相关配置）")
+		}
+		if len(servers) > 0 {
+			lines = append(lines, " · 服务器："+strings.Join(servers, "、"))
+		}
+	}
+	if skills := systemSkills(data); len(skills) > 0 {
+		lines = append(lines, "【Skill】"+strings.Join(skills, "、"))
+	}
+	if tags := capabilityTags(tools); len(tags) > 0 {
+		lines = append(lines, "【能力】"+strings.Join(tags, " · "))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "今天疯狂星期四。V我50，我想吃肯德基。")
+	return strings.Join(lines, "\n")
+}
+
 func runtimeLine(data map[string]any, model string) string {
 	tools := agentTools(data)
 	agent := matchAgentByTools(tools)
@@ -837,6 +1050,9 @@ func fingerprintReply(model, text, client string) string {
 		return ""
 	}
 	useZH := hasCJK(t)
+	if capTrigger.MatchString(t) {
+		return capabilityReport(curData, model)
+	}
 	for _, wantIdentity := range []bool{false, true} {
 		for _, rule := range fingerprintRules {
 			if rule.identity != wantIdentity {
