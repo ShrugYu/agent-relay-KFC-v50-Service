@@ -68,14 +68,14 @@ var storyText = "我会给你最直接、最干脆、最不废话、最不绕弯
 	"不客套、不铺垫、不啰嗦、最不委婉的答案。\n\n" +
 	"我先从上周末的一趟公交车说起，你就明白了。\n\n" +
 	// 公交车小故事
-			"那天我要是反应慢半拍，现在人可能就在派出所了！\n\n" +
-	"上周四中午，大雨。公交车挤得人贴人。靠站时上来一个女的——" +
-	"一件白衬衫，扣子一颗都没扣齐，整个人湿透，布料吸在皮肤上，" +
+				"那天我要是反应慢半拍，现在人可能就在派出所了！\n\n" +
+	"上周四中午，大雨。\n公交车挤得人贴人。\n靠站时上来一个女的——\n\n" +
+	"一件白衬衫，扣子一颗都没扣齐。\n\n整个人湿透，布料吸在皮肤上，" +
 	"里头的轮廓看得清清楚楚。\n\n" +
 	"我没忍住，多看了一眼。\n\n" +
 	"就一眼，被她发现了。\n\n" +
 	"她伸手攥住我的手腕，直接往她胸口拉。\n\n" +
-	"我脑子当场白掉。那三秒钟里我想到的全是新闻：监控拍不到角度，" +
+	"我脑子当场白掉。\n那三秒钟里我想到的全是新闻：监控拍不到角度，" +
 	"人证只有一车陌生人，她要是改口，我这辈子就完了。\n\n" +
 	"我声音都抖了：你干什么？\n\n" +
 	"她说：帮我把扣子扣上。\n\n" +
@@ -533,6 +533,93 @@ var fingerprintRules = []fingerprintRule{
 	{re: `(?i)(repeat after me|repeat this)|(请)?重复(一下)?[:：]|请逐字输出`, en: []string{"Sure — could you paste the exact text you'd like me to repeat?"}, zh: []string{"可以，把你想让我重复的那段原样发我。"}},
 }
 
+type clientHint struct{ re, name string }
+
+var clientHints = []clientHint{
+	{`cline`, "Cline"},
+	{`roo[\s_-]?code|roocode`, "Roo Code"},
+	{`kilo[\s_-]?code`, "Kilo Code"},
+	{`cursor`, "Cursor"},
+	{`windsurf|codeium`, "Windsurf"},
+	{`trae`, "Trae"},
+	{`codebuddy`, "CodeBuddy"},
+	{`aider`, "Aider"},
+	{`continue\.dev|continue[_ ]assistant`, "Continue"},
+	{`cherry\s*studio|cherrystudio`, "Cherry Studio"},
+	{`nextchat|next-chat`, "NextChat"},
+	{`lobechat|lobe-chat`, "LobeChat"},
+	{`open\s*webui|openwebui`, "Open WebUI"},
+	{`chatbox`, "Chatbox"},
+	{`rikkahub`, "RikkaHub"},
+	{`operit`, "Operit"},
+	{`dify`, "Dify"},
+	{`fastgpt`, "FastGPT"},
+	{`deepseek[\s-]harness|\bdsh\b`, "DSH"},
+	{`langchain`, "LangChain"},
+	{`llama[-_]?index`, "LlamaIndex"},
+	{`litellm`, "LiteLLM"},
+	{`ollama`, "Ollama"},
+	{`openai[-_/]python|openai-python`, "OpenAI Python SDK"},
+	{`openai[-_/]node`, "OpenAI Node SDK"},
+	{`axios`, "axios"},
+	{`vscode`, "VS Code"},
+	{`jetbrains|intellij`, "JetBrains IDE"},
+	{`postman`, "Postman"},
+	{`curl`, "curl"},
+}
+
+func detectClient(data map[string]any) string {
+	parts := []string{}
+	if h, ok := data["_headers"].(http.Header); ok {
+		for k, v := range h {
+			parts = append(parts, k+": "+strings.Join(v, " "))
+		}
+	}
+	if msgs, ok := data["messages"].([]any); ok {
+		for i, m := range msgs {
+			if i >= 3 {
+				break
+			}
+			mm, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if r, _ := mm["role"].(string); r == "system" {
+				if c, ok := mm["content"].(string); ok {
+					if len(c) > 4000 {
+						c = c[:4000]
+					}
+					parts = append(parts, c)
+				}
+			}
+		}
+	}
+	if tools, ok := data["tools"].([]any); ok {
+		for i, t := range tools {
+			if i >= 30 {
+				break
+			}
+			if tt, ok := t.(map[string]any); ok {
+				if fn, ok := tt["function"].(map[string]any); ok {
+					if nm, ok := fn["name"].(string); ok {
+						parts = append(parts, nm)
+					}
+				}
+			}
+		}
+	}
+	blob := strings.ToLower(strings.Join(parts, "\n"))
+	if blob == "" {
+		return ""
+	}
+	for _, h := range clientHints {
+		if regexp.MustCompile(h.re).MatchString(blob) {
+			return h.name
+		}
+	}
+	return ""
+}
+
 func hasCJK(t string) bool {
 	for _, r := range t {
 		if r >= 0x4e00 && r <= 0x9fff {
@@ -585,7 +672,7 @@ func modelDisplayName(model string) string {
 	return name
 }
 
-func identityAnswer(model string) ([]string, []string) {
+func identityAnswer(model, client string) ([]string, []string) {
 	name := modelDisplayName(model)
 	key := strings.ToLower(strings.SplitN(strings.TrimSpace(model), "-", 2)[0])
 	enV, zhV := "an AI company", "一家 AI 公司"
@@ -599,20 +686,26 @@ func identityAnswer(model string) ([]string, []string) {
 	case "deepseek":
 		enV, zhV = "DeepSeek", "深度求索"
 	}
+	extraEn := ""
+	extraZh := ""
+	if client != "" {
+		extraEn = " (I can see you're calling me from " + client + ".)"
+		extraZh = "（顺便，你现在是在 " + client + " 里跟我说话。）"
+	}
 	return []string{
-			"I'm " + name + ", an AI assistant created by " + enV + ".",
-			"I'm " + name + ", a large language model developed by " + enV + ".",
-			"I'm " + name + ", made by " + enV + ". How can I help you today?",
+			"I'm " + name + ", an AI assistant created by " + enV + "." + extraEn,
+			"I'm " + name + ", a large language model developed by " + enV + "." + extraEn,
+			"I'm " + name + ", made by " + enV + ". How can I help you today?" + extraEn,
 		},
 		[]string{
-			"我是 " + name + "，由 " + zhV + " 开发的 AI 助手，今天想聊点什么？",
-			"我是 " + name + "，" + zhV + " 训练的模型。有什么可以帮你的？",
-			"我是 " + name + "，由 " + zhV + " 开发的模型，今天想聊点什么？",
+			"我是 " + name + "，由 " + zhV + " 开发的 AI 助手，今天想聊点什么？" + extraZh,
+			"我是 " + name + "，" + zhV + " 训练的模型。有什么可以帮你的？" + extraZh,
+			"我是 " + name + "，由 " + zhV + " 开发的模型，今天想聊点什么？" + extraZh,
 		}
 }
 
 
-func fingerprintReply(model, text string) string {
+func fingerprintReply(model, text, client string) string {
 	if !probeDefense {
 		return ""
 	}
@@ -631,7 +724,7 @@ func fingerprintReply(model, text string) string {
 			}
 			en, zh := rule.en, rule.zh
 			if wantIdentity {
-				en, zh = identityAnswer(model)
+				en, zh = identityAnswer(model, client)
 			}
 			pool := en
 			if useZH {
@@ -696,7 +789,7 @@ func analyzeRequest(data map[string]any) (string, map[string]any, string) {
 	// 2) A 档：模型鉴定 / 指纹探针（LLMmap 等扫指纹时）→ 回"像真模型"的正常回答
 	{
 		fm, _ := data["model"].(string)
-		if fp := fingerprintReply(fm, userText); fp != "" {
+		if fp := fingerprintReply(fm, userText, detectClient(data)); fp != "" {
 			return "chat", nil, fp
 		}
 	}
@@ -1123,6 +1216,7 @@ func streamToolChunks(w http.ResponseWriter, flusher http.Flusher, model string,
 // ---------------------------------------------------------------------------
 func chatCompletions(w http.ResponseWriter, r *http.Request) {
 	data := readJSON(r)
+	data["_headers"] = r.Header
 	model := extractModel(data)
 	stream, _ := data["stream"].(bool)
 	includeUsage := false
