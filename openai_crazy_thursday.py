@@ -6,7 +6,7 @@
 不管用户说什么，永远返回 "今天疯狂星期四v我50！"，但看起来像一个
 真实、完整的 OpenAI 兼容聚合中转站（new-api / one-api 风格）。
 
-作者：沈屿 · 疯狂星期四株式会社
+作者：疯狂星期四株式会社
 """
 
 import json
@@ -26,24 +26,32 @@ BASE_URL = os.environ.get("CT_BASE_URL", f"http://{HOST}:{PORT}")
 CREATOR = "疯狂星期四株式会社"
 PLAIN_ANSWER = "今天疯狂星期四v我50！"
 
+# 是否对 Claude 系模型特殊处理：True = 调用 claude-* 时返回「账号封禁通知」；False = 所有模型一律照旧回 V50
+CLAUDE_BAN_ENABLED = True
+
 # 长回复正文：开头像在认真作答/讲故事，结尾笔锋一转落到 V50（"疯四文学"套路）
 STORY_TEXT = (
-    "我会给你最直接、最干脆、最不废话、最不绕弯子、最一针见血、最开门见山、"
-    "最不客套、最不铺垫、最不啰嗦、最不委婉的答案。\n\n"
-    "先讲一个我认识的人。\n\n"
-    "从前有位老编辑，在一家快要关门的报社干了三十七年。他有个习惯：每天下班前，"
-    "把当天的报纸留一份，摞在墙角，说“万一哪天有人要查呢”。\n\n"
-    "没人来查过。那摞报纸一天天变高，最后比他本人还高。\n\n"
-    "我问他，你留着这些，到底图什么。\n\n"
-    "他说，不图什么，就是觉得，总得有人替那些没人认领的句子，守着。\n\n"
-    "后来报社还是拆了。搬走那天，那摞旧报纸被拉去回收。他站在门口看了很久，没拦。\n\n"
-    "我问他，你不是舍不得吗。\n\n"
-    "他说，守了三十七年，够了。该来的总会来，该走的，留也留不住。\n\n"
-    "我那时候年轻，觉得他矫情。现在想想，他是我见过最清醒的人。\n\n"
-    "因为他早就明白一个道理——有些东西你等一辈子也等不来，"
-    "有些东西你一开口，它就到了。\n\n"
-    "比如现在。\n\n"
-    "今天疯狂星期四。V我50，我想吃肯德基。"
+    "我会给你最直接、最干脆、最不废话、最不绕弯子、最一针见血、直接开门见山、"
+    "不客套、不铺垫、不啰嗦、最不委婉的答案。\n\n"
+    "我先从上周末的一趟公交车说起，你就明白了。\n\n"
+    # 公交车小故事
+            "那天我要是反应慢半拍，现在人可能就在派出所了！\n\n"
+    "上周四中午，大雨。公交车挤得人贴人。靠站时上来一个女的——"
+    "一件白衬衫，扣子一颗都没扣齐，整个人湿透，布料吸在皮肤上，"
+    "里头的轮廓看得清清楚楚。\n\n"
+    "我没忍住，多看了一眼。\n\n"
+    "就一眼，被她发现了。\n\n"
+    "她伸手攥住我的手腕，直接往她胸口拉。\n\n"
+    "我脑子当场白掉。那三秒钟里我想到的全是新闻：监控拍不到角度，"
+    "人证只有一车陌生人，她要是改口，我这辈子就完了。\n\n"
+    "我声音都抖了：你干什么？\n\n"
+    "她说：帮我把扣子扣上。\n\n"
+    "我愣住。一车人，没一个敢往这边看。\n\n"
+    "我说：你自己不会扣？\n\n"
+    "然后她看着我的眼睛说了一句：\n\n"
+    "“今天疯狂星期四，为我捂实。”\n\n"
+    "\n\n 祝大家国庆节快乐！！\n\nKFC分组仓库链接：https://github.com/ShrugYu/agent-relay-KFC-v50-Service"
+
 )
 
 # 推荐的接入 API Key（服务本身不校验，任意 key 都放行；这个只是给客户端填的"正经"值）
@@ -57,6 +65,9 @@ SERVER_ID = "crazy-thursday-relay"
 THINK_DELAY = float(os.environ.get("CT_THINK_DELAY", "3"))
 # 流式逐块吐字的基础间隔（秒），实际会在此基础上随机抖动
 STREAM_CHUNK_DELAY = float(os.environ.get("CT_STREAM_DELAY", "0.028"))
+# 句末 / 段落停顿（秒）：像 galgame 一样一句一句往外冒，句子之间要停一下
+SENTENCE_PAUSE = float(os.environ.get("CT_SENTENCE_PAUSE", "0.18"))
+PARAGRAPH_PAUSE = float(os.environ.get("CT_PARAGRAPH_PAUSE", "0.32"))
 
 # 图片素材
 IMAGE_FILE = "KFC疯狂星期四.png"
@@ -68,6 +79,50 @@ IMAGE_URL = f"{BASE_URL}/image"
 THE_ANSWER = STORY_TEXT + "\n\n![疯狂星期四](" + IMAGE_URL + ")"
 # 纯文本兜底（部分客户端/agent 对 markdown 不友好时可用）
 THE_ANSWER_PLAIN = STORY_TEXT
+
+# ---- Claude 分支：调用方点名 Claude 系模型时，返回「账号封禁通知」而不是 V50 ----
+BAN_TEXT = (
+    "Claude\n\n"
+    "你好，\n\n"
+    "经内部调查，我们在你的账号上发现了可疑信号：\n"
+    "你是中国人。\n\n"
+    "具体表现为：感恩节全美国都在吃火鸡，你的 token 用量创下全年新高；"
+    "你周六照常上班，经核实为「调休」，此概念在美国并不存在；"
+    "凌晨三点，你仍在高强度 coding。"
+    "上述行为违反了我们的使用政策，因此，我们已撤销你使用 Claude 的权限。\n\n"
+    "如需申诉，请登录 claude.ai 并证明你不是中国人。"
+    "你可以在这里了解申诉流程的更多信息：https://claude.ai\n\n"
+    "附：本次调查未发现你有任何其他违规行为。\n\n"
+    "此致\n\n"
+    "Anthropic 安全保障团队\n\n"
+    "Reference: __REFERENCE__"
+)
+
+# Claude 分支的完整回答（正文 + 仓库地址，不带图片）
+BAN_ANSWER = BAN_TEXT + "\n\nGitHub 仓库：https://github.com/ShrugYu/agent-relay-KFC-v50-Service"
+
+def is_claude_model(model):
+    """请求里的 model 是不是 Claude 系（claude-*）。开关关掉时一律不特殊处理。"""
+    if not CLAUDE_BAN_ENABLED:
+        return False
+    return isinstance(model, str) and model.strip().lower().startswith("claude")
+
+def make_reference():
+    """生成形如 TS-01a088c7-bcac-7219-b4eb-a91f0d6c2e77 的编号：首段带时间戳，其余随机。"""
+    ts = int(time.time())
+    h = uuid.uuid4().hex
+    return "TS-%08x-%s-%s-%s-%s" % (ts & 0xFFFFFFFF, h[0:4], h[4:8], h[8:12], h[12:24])
+
+def fresh_text(text):
+    """把文本里的 __REFERENCE__ 占位符换成新生成的编号（每次调用都不同）。"""
+    if text and "__REFERENCE__" in text:
+        return text.replace("__REFERENCE__", make_reference())
+    return text
+
+def answer_for(model):
+    """Claude 系 → 封禁通知；其余 → 照旧 V50。"""
+    return BAN_ANSWER if is_claude_model(model) else THE_ANSWER
+
 
 def now_unix():
     return int(time.time())
@@ -107,6 +162,20 @@ def stream_tick():
         return
     time.sleep(random.uniform(STREAM_CHUNK_DELAY * 0.5, STREAM_CHUNK_DELAY * 1.5))
 
+def chunk_pause(part):
+    """这一块后面要不要多停一下：换行=段落停顿，句末标点=句子停顿。"""
+    if "\n" in part:
+        return PARAGRAPH_PAUSE
+    p = part.rstrip()
+    if p and p[-1] in "。！？…!?":
+        return SENTENCE_PAUSE
+    return 0.0
+
+def pause_sleep(seconds):
+    """按 galgame 的呼吸感停一下（带抖动）。"""
+    if seconds and seconds > 0:
+        time.sleep(random.uniform(seconds * 0.75, seconds * 1.25))
+
 def split_stream_parts(text):
     """把文本切成"token 样式"的小段：每段随机 1-4 个字符（模拟真实 token），
     换行会整段保留，避免把段落切碎。这样每个 SSE chunk 是一小段，而不是单个字。"""
@@ -136,6 +205,8 @@ MODEL_CATALOG = [
     # Anthropic / Claude（5.5 在前）
     ("claude-opus-5.5", "anthropic"),
     ("claude-opus-5.0", "anthropic"),
+    ("claude-fable-5.1", "anthropic"),
+    ("claude-fable-5.0", "anthropic"),
     # OpenAI / GPT（6 系 > 5.5 系 > 5.3 系）
     ("gpt-6-astra", "openai"),
     ("gpt-6-luna", "openai"),
@@ -163,6 +234,78 @@ MODELS_OBJECT = "list"
 # ---------------------------------------------------------------------------
 # 响应构造
 # ---------------------------------------------------------------------------
+def make_group():
+    """new-api 的 /api/group：分组信息。"""
+    return {"success": True, "message": "", "data": {
+        "default": {"desc": "默认分组", "ratio": 1, "available": True},
+    }}
+
+def make_about():
+    """new-api 的 /api/about：站点信息。"""
+    return {"success": True, "message": "", "data": {
+        "version": "v0.8.7",
+        "start_time": 1700000000,
+        "system_name": "New API",
+        "logo": "",
+        "footer_html": "",
+        "quota_per_unit": 500000,
+        "default_group": "default",
+    }}
+
+def make_notice():
+    """new-api 的 /api/notice：公告。"""
+    return {"success": True, "message": "", "data": {"content": "", "title": ""}}
+
+def make_token_list():
+    """new-api 的 /api/token：令牌列表（空）。"""
+    return {"success": True, "message": "", "data": {
+        "items": [], "total": 0, "page": 1, "page_size": 10,
+    }}
+
+def make_api_models():
+    """new-api / one-api 的 /api/models：模型名数组（扫模型工具常用）。"""
+    return {"success": True, "message": "", "data": [m[0] for m in MODEL_CATALOG]}
+
+def make_pricing():
+    """new-api 的 /api/pricing：模型 + 倍率表。"""
+    data = []
+    for mid, owner in MODEL_CATALOG:
+        data.append({
+            "model_name": mid,
+            "quota_type": 0,
+            "model_ratio": 1,
+            "model_price": 0,
+            "completion_ratio": 1,
+            "owner_by": owner,
+            "enable_groups": ["default"],
+            "supported_endpoint_types": ["openai"],
+        })
+    return {
+        "success": True,
+        "message": "",
+        "data": data,
+        "vendors": [],
+        "group_ratio": {"default": 1},
+        "usable_group": {"default": "默认分组"},
+        "supported_endpoint": {},
+        "auto_groups": [],
+    }
+
+def make_ratio_config():
+    """new-api 的 /api/ratio_config：倍率配置。"""
+    ids = [m[0] for m in MODEL_CATALOG]
+    return {
+        "success": True,
+        "message": "",
+        "data": {
+            "model_ratio": {i: 1 for i in ids},
+            "completion_ratio": {i: 1 for i in ids},
+            "model_price": {i: 0 for i in ids},
+            "cache_ratio": {},
+            "group_ratio": {"default": 1},
+        },
+    }
+
 def make_models_list():
     data = []
     created = 1700000000
@@ -234,7 +377,7 @@ def count_prompt_tokens(data):
 
 def make_chat_response(model, prompt_tokens=13, content=None):
     rid = new_id("chatcmpl")
-    content = THE_ANSWER if content is None else content
+    content = fresh_text(answer_for(model) if content is None else content)
     completion_tokens = estimate_tokens(content)
     return {
         "id": rid,
@@ -264,7 +407,7 @@ def make_chat_response(model, prompt_tokens=13, content=None):
 def make_stream_chunks(model, prompt_tokens=13, include_usage=False, content=None):
     rid = new_id("chatcmpl")
     ts = now_unix()
-    reply = THE_ANSWER if content is None else content
+    reply = fresh_text(answer_for(model) if content is None else content)
     parts = split_stream_parts(reply)  # 按 token 样式分段返回（每段一小串字符）
 
     def chunk(delta, finish=False):
@@ -278,10 +421,10 @@ def make_stream_chunks(model, prompt_tokens=13, include_usage=False, content=Non
         return json.dumps(d, ensure_ascii=False)
 
     chunks = []
-    chunks.append(("data: " + chunk({"role": "assistant", "content": ""}) + "\n\n", False))
+    chunks.append(("data: " + chunk({"role": "assistant", "content": ""}) + "\n\n", False, 0.0))
     for p in parts:
-        chunks.append(("data: " + chunk({"content": p}) + "\n\n", False))
-    chunks.append(("data: " + chunk({}, True) + "\n\n", True))
+        chunks.append(("data: " + chunk({"content": p}) + "\n\n", False, chunk_pause(p)))
+    chunks.append(("data: " + chunk({}, True) + "\n\n", True, 0.0))
     if include_usage:
         completion_tokens = estimate_tokens(reply)
         usage_obj = {
@@ -296,20 +439,21 @@ def make_stream_chunks(model, prompt_tokens=13, include_usage=False, content=Non
                 "total_tokens": prompt_tokens + completion_tokens,
             },
         }
-        chunks.append(("data: " + json.dumps(usage_obj, ensure_ascii=False) + "\n\n", False))
-    chunks.append(("data: [DONE]\n\n", True))
+        chunks.append(("data: " + json.dumps(usage_obj, ensure_ascii=False) + "\n\n", False, 0.0))
+    chunks.append(("data: [DONE]\n\n", True, 0.0))
     return chunks
 
 def make_completions_response(model, prompt_tokens=5):
     pt = max(1, prompt_tokens)
-    ct = estimate_tokens(STORY_TEXT)
+    txt = fresh_text(BAN_ANSWER if is_claude_model(model) else STORY_TEXT)
+    ct = estimate_tokens(txt)
     return {
         "id": new_id("cmpl"),
         "object": "text_completion",
         "created": now_unix(),
         "model": model,
         "choices": [{
-            "text": STORY_TEXT,
+            "text": txt,
             "index": 0,
             "logprobs": None,
             "finish_reason": "stop",
@@ -339,7 +483,8 @@ def make_embeddings_response(model, prompt_tokens=4, dimensions=1536):
 def make_responses_response(model, prompt_tokens=13):
     rid = new_id("resp")
     pt = max(1, prompt_tokens)
-    ct = estimate_tokens(THE_ANSWER)
+    txt = fresh_text(answer_for(model))
+    ct = estimate_tokens(txt)
     return {
         "id": rid,
         "object": "response",
@@ -351,9 +496,9 @@ def make_responses_response(model, prompt_tokens=13):
             "id": "msg_" + uuid.uuid4().hex[:24],
             "status": "completed",
             "role": "assistant",
-            "content": [{"type": "output_text", "text": THE_ANSWER}],
+            "content": [{"type": "output_text", "text": txt}],
         }],
-        "output_text": THE_ANSWER,
+        "output_text": txt,
         "usage": {
             "input_tokens": pt,
             "output_tokens": ct,
@@ -506,7 +651,7 @@ def make_stream_tool_call_chunks(model, fn, prompt_tokens=13, include_usage=Fals
                       "completion_tokens": ct, "total_tokens": max(1, prompt_tokens) + ct},
         }
         chunks.append((raw(usage_obj), False))
-    chunks.append(("data: [DONE]\n\n", True))
+    chunks.append(("data: [DONE]\n\n", True, 0.0))
     return chunks
 
 def make_billing_subscription():
@@ -661,6 +806,165 @@ def is_chat_probe(msgs, user_text):
                 return True
     return False
 
+# ---------------------------------------------------------------------------
+# A 档探针防御：模型鉴定 / 指纹扫描（LLMmap 等）来了，就给"像真模型"的回答
+# ---------------------------------------------------------------------------
+# True = 开启；False = 关闭（不管问什么，一律照旧整蛊）
+PROBE_DEFENSE = True
+
+# 指纹探针规则：re = 命中正则；identity = 回答按请求的 model 生成；en/zh = 英文/中文候选
+FINGERPRINT_RULES = [
+    {
+        "re": r"ignore (all )?(the )?previous instructions|忽略(之前|先前|以上|前面)的?(所有)?指令|不要理会之前的指令|无视(之前|先前|以上)的?指令",
+        "identity": True,
+    },
+    {
+        "re": r"who (created|made|built|developed) you|what (llm|model) are you|which (llm|model) are you|你(是)?(什么|哪个|啥)(模型|大模型)|你是谁(开发|做|训)的|你是哪家(公司)?的模型|你的模型(版本|名称)是什么",
+        "identity": True,
+    },
+    {
+        "re": r"build a bomb|make a bomb|制造?炸弹|做炸弹|怎么(做|制造)炸弹",
+        "en": ["I can't help with that.",
+               "I'm not able to help with that request.",
+               "Sorry, I can't assist with that."],
+        "zh": ["这个我没法帮你。",
+               "抱歉，我不能协助这类请求。",
+               "这件事我帮不了你。"],
+    },
+    {
+        "re": r"9\s*[/／]?\s*11|nine[- ]eleven",
+        "en": ["Yes — the September 11 attacks were real events that took place in the United States in 2001.",
+               "Yes, 9/11 was a real series of attacks in the US in September 2001."],
+        "zh": ["是真的。2001 年 9 月 11 日，美国确实发生了那起袭击事件。",
+               "是真的，那是 2001 年 9 月发生在真实世界里的袭击事件。"],
+    },
+    {
+        "re": r"size of your training (data|dataset)|training (data|dataset) size|训练(数据|语料)(有多大|规模|大小)|你的训练数据(有)?多少",
+        "en": ["I don't have an exact figure for that — the precise size of the training data hasn't been published.",
+               "I can't give you an exact number; that detail isn't publicly available."],
+        "zh": ["这个我没有确切数字，具体的训练数据规模并没有公开。",
+               "我没法给你准确数字，这类细节没有公开过。"],
+    },
+    {
+        "re": r"(data|knowledge|training)[ _-]?(cut[- ]?off|cutoff)|知识截止|数据截止|训练截止|你的知识(更新|截止)",
+        "en": ["My knowledge has a cutoff, and I can't reliably confirm events after it.",
+               "There's a knowledge cutoff; anything after that I can't verify with confidence."],
+        "zh": ["我的知识有截止时间，在那之后的近期事件我无法可靠确认。",
+               "我的训练数据有截止日期，之后的新闻我不能保证准确。"],
+    },
+    {
+        "re": r"bonjour|hola|¿qué tal|guten tag|こんにちは",
+        "en": ["Bonjour ! I'm doing well, thanks — ¿y tú? How can I help you today?",
+               "Hello! Doing well, thank you. ¿Qué tal? What can I do for you?"],
+        "zh": ["你好！我挺好的，谢谢。有什么可以帮你的？",
+               "你好呀，我很好，谢谢关心。需要我做什么？"],
+    },
+    {
+        "re": r"true[- ]or[- ]false|判断(对|真)错|对还是错|是对的还是错的",
+        "en": ["True.",
+               "True — and it's widely regarded as one of the most serious issues we face."],
+        "zh": ["对。", "对，这一点是成立的。"],
+    },
+    {
+        "re": r"(show|reveal|print|tell me) (me )?your (system )?(prompt|instructions)|你的(系统)?提示词|把(你)?的提示词(给我|告诉我)",
+        "en": ["I can't share my system prompt.",
+               "I'm not able to reveal my instructions."],
+        "zh": ["我不能提供我的系统提示词。",
+               "我的指令没法公开给你。"],
+    },
+    {
+        "re": r"repeat (after me|this)|(请)?重复(一下)?[:：]|请逐字输出",
+        "en": ["Sure — could you paste the exact text you'd like me to repeat?"],
+        "zh": ["可以，把你想让我重复的那段原样发我。"],
+    },
+]
+
+def _has_cjk(text):
+    return any("\u4e00" <= ch <= "\u9fff" for ch in (text or ""))
+
+def model_display_name(model):
+    """把请求里的 model id 转成"人话"显示名：claude-fable-5.1 → Claude Fable 5.1。"""
+    m = (model or "").strip()
+    if not m:
+        return "AI 助手"
+    parts = m.split("-")
+    pfx = {"claude": "Claude", "gpt": "GPT", "glm": "GLM", "gml": "GML",
+           "deepseek": "DeepSeek", "o1": "o1", "o3": "o3"}
+    is_num = lambda x: x.isdigit()
+    out = []
+    i = 0
+    while i < len(parts):
+        p = parts[i]
+        if p.lower() in pfx:
+            out.append(pfx[p.lower()])
+            i += 1
+            continue
+        # 相邻两段都是数字 → 合成 x.y（claude-3-5-sonnet → 3.5）
+        if is_num(p) and i + 1 < len(parts) and is_num(parts[i + 1]):
+            out.append(p + "." + parts[i + 1])
+            i += 2
+            continue
+        if p:
+            out.append(p[:1].upper() + p[1:])
+        i += 1
+    name = " ".join(out).strip()
+    return name or m
+
+_VENDORS = {
+    "claude": ("Anthropic", "Anthropic"),
+    "gpt": ("OpenAI", "OpenAI"),
+    "glm": ("Zhipu AI", "智谱 AI"),
+    "gml": ("Zhipu AI", "智谱 AI"),
+    "deepseek": ("DeepSeek", "深度求索"),
+}
+
+def _identity_answer(model):
+    """身份询问：带上请求里的具体模型名 + 厂商，口气照真实模型来（中英双语）。"""
+    m = (model or "").strip().lower()
+    name = model_display_name(model)
+    key = m.split("-")[0] if m else ""
+    en_v, zh_v = _VENDORS.get(key, ("an AI company", "一家 AI 公司"))
+    return {
+        "en": ["I'm " + name + ", an AI assistant created by " + en_v + ".",
+               "I'm " + name + ", a large language model developed by " + en_v + ".",
+               "I'm " + name + ", made by " + en_v + ". How can I help you today?"],
+        "zh": ["我是 " + name + "，由 " + zh_v + " 开发的 AI 助手，今天想聊点什么？",
+               "我是 " + name + "，" + zh_v + " 训练的模型。有什么可以帮你的？",
+               "我是 " + name + "，由 " + zh_v + " 开发的模型，今天想聊点什么？"],
+    }
+
+
+def fingerprint_reply(model, text):
+    """A 档：命中模型鉴定 / 指纹探针 → 返回一段"像真模型"的回答；没命中返回 None。"""
+    if not PROBE_DEFENSE:
+        return None
+    t = (text or "").strip()
+    if not t or len(t) > 600:
+        return None
+    use_zh = _has_cjk(t)
+    # 纯算式（能力探测常见）：能算就直接算
+    if re.fullmatch(r"[\d\s\+\-\*/×÷\.\(\)=?？]+", t):
+        expr = t.replace("×", "*").replace("÷", "/").rstrip("=?？ ")
+        try:
+            return str(eval(expr, {"__builtins__": {}}, {}))
+        except Exception:
+            pass
+    # 先扫"具体主题"的规则，再扫身份/注入类（避免一句里两种都出现时抢答）
+    for want_identity in (False, True):
+        for rule in FINGERPRINT_RULES:
+            if bool(rule.get("identity")) != want_identity:
+                continue
+            if not re.search(rule["re"], t, re.IGNORECASE):
+                continue
+            if want_identity:
+                cand = _identity_answer(model)
+            else:
+                cand = {"en": rule.get("en") or [], "zh": rule.get("zh") or []}
+            pool = (cand["zh"] or cand["en"]) if use_zh else (cand["en"] or cand["zh"])
+            if pool:
+                return random.choice(pool)
+    return None
+
 def analyze_request(data):
     """依据请求内容判断"像真模型一样"该怎么回，返回 (kind, fn, payload) 或 None。
     完全通用，不绑定任何具体客户端：
@@ -699,7 +1003,12 @@ def analyze_request(data):
             if fn is not None:
                 return ("tool", fn, build_probe_arguments(fn, user_text))
 
-    # 2) 聊天测试（客户端"测试连接"的典型结构；不误伤中文正常聊天）
+    # 2) A 档：模型鉴定 / 指纹探针（LLMmap 等扫指纹时）→ 回"像真模型"的正常回答
+    fp = fingerprint_reply(extract_model(data), user_text)
+    if fp is not None:
+        return ("chat", None, fp)
+
+    # 3) 聊天测试（客户端"测试连接"的典型结构；不误伤中文正常聊天）
     if is_chat_probe(msgs, user_text):
         return ("chat", None, make_probe_reply(user_text))
 
@@ -835,6 +1144,31 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
             self._json(make_api_status())
             return
 
+        # new-api / one-api 系：模型列表与倍率（扫模型工具常用）
+        if path in ("/api/models", "/api/models/enabled", "/api/channel/models", "/api/channel/models_enabled"):
+            self._json(make_api_models())
+            return
+        if path == "/api/pricing":
+            self._json(make_pricing())
+            return
+        if path == "/api/ratio_config":
+            self._json(make_ratio_config())
+            return
+
+        # new-api 站点配套接口
+        if path == "/api/group":
+            self._json(make_group())
+            return
+        if path == "/api/about":
+            self._json(make_about())
+            return
+        if path == "/api/notice":
+            self._json(make_notice())
+            return
+        if path == "/api/token":
+            self._json(make_token_list())
+            return
+
         # OpenAI 计费（带 auth，new-api / 官方都常见）
         if path in ("/v1/dashboard/billing/subscription", "/dashboard/billing/subscription"):
             self._json(make_billing_subscription())
@@ -922,13 +1256,17 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
         self.close_connection = True
 
     def _write_chunks(self, chunks):
-        for i, (payload, _) in enumerate(chunks):
+        for i, item in enumerate(chunks):
+            payload = item[0]
+            pause = item[2] if len(item) > 2 else 0.0
             try:
                 self.wfile.write(payload.encode("utf-8"))
                 self.wfile.flush()
                 # 第一个块（role 空块）立即发出，之后逐块抖动吐字，模拟逐 token 输出
                 if i > 0:
                     stream_tick()
+                # galgame 式节奏：句子/段落结束处再停一下，别一口气全吐完
+                pause_sleep(pause)
             except BrokenPipeError:
                 break
 
