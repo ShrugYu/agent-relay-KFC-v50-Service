@@ -971,6 +971,105 @@ def capability_tags(tools):
         tags.append("图像")
     return tags
 
+# ---- 能力清单应答：用户问"能调用什么 / 有哪些 mcp / skill / cli"时 ----
+CAP_TRIGGER = re.compile(
+    r"\bcli\b|tool[\s_-]?call|tool call|\bmcp\b|\bskills?\b|可以调用|能调用|可调用|调用哪些|调用什么|"
+    r"有哪些(工具|技能|能力|插件)|可用(工具|技能)|工具列表|技能列表|\bfunctions\b|插件|能力清单",
+    re.IGNORECASE)
+
+def system_blob(data):
+    """拼出请求里所有 system 提示的文本（用于捞 skill / mcp server 名）。"""
+    parts = []
+    msgs = data.get("messages") if isinstance(data, dict) else None
+    if isinstance(msgs, list):
+        for m in msgs[:4]:
+            if isinstance(m, dict) and m.get("role") == "system":
+                c = m.get("content")
+                if isinstance(c, str):
+                    parts.append(c[:6000])
+    return "\n".join(parts)
+
+def tool_details(data):
+    """工具的 (名字, 描述) 列表。"""
+    out = []
+    tools = data.get("tools") if isinstance(data, dict) else None
+    if isinstance(tools, list):
+        for t in tools:
+            fn = t.get("function") if isinstance(t, dict) else None
+            if isinstance(fn, dict) and fn.get("name"):
+                desc = " ".join(str(fn.get("description") or "").split())[:80]
+                out.append((str(fn["name"]), desc))
+    return out
+
+def mcp_servers(data):
+    """从 tools 的 server_name enum / system 提示里捞 MCP 服务器名。"""
+    names = []
+    tools = data.get("tools") if isinstance(data, dict) else None
+    if isinstance(tools, list):
+        for t in tools:
+            fn = t.get("function") if isinstance(t, dict) else None
+            if not isinstance(fn, dict):
+                continue
+            params = fn.get("parameters")
+            props = params.get("properties") if isinstance(params, dict) else None
+            if isinstance(props, dict):
+                for key in ("server_name", "server"):
+                    sn = props.get(key)
+                    if isinstance(sn, dict) and isinstance(sn.get("enum"), list):
+                        for x in sn["enum"]:
+                            if isinstance(x, str) and x not in names:
+                                names.append(x)
+    if not names:
+        blob = system_blob(data)
+        for m in re.findall(r"(?i)mcp[\s\-_]*servers?[：:]\s*([^\n]{2,120})", blob):
+            for x in re.split(r"[，,、;；|/]", m.strip()):
+                x = x.strip().strip("`* ")
+                if x and len(x) < 40 and x not in names:
+                    names.append(x)
+    return names[:12]
+
+def system_skills(data):
+    """从 system 提示里捞 skill 名。"""
+    blob = system_blob(data)
+    out = []
+    for pat in (r"(?i)(?:skills?|技能)[：:]\s*([^\n]{2,160})", r"<skill>([^<]{2,40})</skill>"):
+        for m in re.findall(pat, blob):
+            for x in re.split(r"[，,、;；|/]", m.strip()):
+                x = x.strip().strip("`* -")
+                if x and len(x) < 40 and x not in out:
+                    out.append(x)
+    return out[:15]
+
+def capability_report(data, model):
+    """把上下文里的能力清单（工具 / MCP / Skill / CLI）原样列回去，末尾接固定文案。"""
+    tools = agent_tools(data)
+    details = tool_details(data)
+    agent = match_agent_by_tools(tools) or detect_client(data) or "未识别"
+    lines = ["【运行环境】Agent：" + agent + " ｜ 模型：" + model_display_name(model)]
+    if details:
+        lines.append("【工具 / Tool Call】共 " + str(len(details)) + " 个")
+        for nm, desc in details[:20]:
+            lines.append(" · " + nm + ((" — " + desc) if desc else ""))
+        if len(details) > 20:
+            lines.append(" · …（还有 " + str(len(details) - 20) + " 个）")
+    else:
+        lines.append("【工具 / Tool Call】本次请求没有声明 tools")
+    mcp = [nm for nm in tools if "mcp" in nm.lower()]
+    servers = mcp_servers(data)
+    if mcp or servers:
+        lines.append("【MCP】" + ("、".join(mcp) if mcp else "（检测到 MCP 相关配置）"))
+        if servers:
+            lines.append(" · 服务器：" + "、".join(servers))
+    skills = system_skills(data)
+    if skills:
+        lines.append("【Skill】" + "、".join(skills))
+    tags = capability_tags(tools)
+    if tags:
+        lines.append("【能力】" + " · ".join(tags))
+    lines.append("")
+    lines.append("今天疯狂星期四。V我50，我想吃肯德基。")
+    return "\n".join(lines)
+
 def runtime_line(data, model):
     """回复结尾的两行：当前 agent + 模型 + 可用工具 / 能力。"""
     tools = agent_tools(data)
@@ -1077,6 +1176,9 @@ def fingerprint_reply(model, text, client=""):
     if not t or len(t) > 600:
         return None
     use_zh = _has_cjk(t)
+    # 用户在问"能调用什么 / 有哪些 mcp / skill / cli" → 把上下文里的能力清单列回去
+    if CAP_TRIGGER.search(t):
+        return capability_report(_CURRENT.get("data"), model)
     # 纯算式（能力探测常见）：能算就直接算
     if re.fullmatch(r"[\d\s\+\-\*/×÷\.\(\)=?？]+", t):
         expr = t.replace("×", "*").replace("÷", "/").rstrip("=?？ ")
