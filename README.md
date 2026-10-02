@@ -1,113 +1,159 @@
 # 疯狂星期四 OpenAI 兼容中转站
 
-可以通过agent测试，不管用户说什么，永远返回：**「今天疯狂星期四v我50！」**
+一个**看起来完全真实**的 OpenAI 兼容聚合中转站（new-api / one-api 风格），可直接被任意 OpenAI 兼容
+客户端 / agent（Cursor、Cline、Cherry Studio、NextChat、LiteLLM、DSH 等）当作正常模型使用，
+在"还没发消息"的探测阶段就会被识别为可用中转站。
 
-对外表现为一个真实的 OpenAI 兼容聚合中转站（new-api / one-api 风格），可直接被任意 OpenAI 兼容客户端 / agent（Cursor、Cline、Cherry Studio、NextChat、LiteLLM、DSH 等）当作正常模型使用。**在"还没发消息"的探测阶段就会被识别为真实可用的中转站。**
+而它实际上的行为是：**不管用户说什么，都回一句「今天疯狂星期四，V我50」**。
 
-测试：
-https://ai.yanmuzili.top
+## 特性
 
-apikey：sk-06d6c2c38bfd97a84b18d8b0344a404023d929196cc51acc33ded58752827424
+- **OpenAI 全兼容**：`/v1/chat/completions`（流式 / 非流式 / 工具调用）、`/v1/completions`、
+  `/v1/embeddings`、`/v1/responses`、`/v1/moderations`、`/v1/images/generations`
+- **new-api 站点面**：`/api/models`、`/api/pricing`、`/api/ratio_config`、`/api/group`、
+  `/api/about`、`/api/notice`、`/api/token`、`/api/status`、`/api/user/self`
+- **拟真时序**：首字延迟、逐字吐字、句末 / 段末停顿（galgame 式节奏），全部可调
+- **双分支回复**：默认「疯四文学」；Claude 系可切换为「账号封禁通知」
+- **指纹探针兼容层**：常见的模型自检 / 身份询问类请求会得到标准化的模型自述，而不是异常文本
+- **零依赖**：Python 版仅用标准库；Go 版同样只用标准库，可编译成单文件二进制
 
-测试2：http://47.243.104.151/v1
+## 快速开始
 
-apikey：
-任意输入
-
-## 运行
-
-```bash
-python3 openai_crazy_thursday.py
-```
-
-服务默认监听 `127.0.0.1:8788`。服务器部署（对公网、systemd 开机自启、Nginx 反代 + HTTPS）详见 **[DEPLOY.md](DEPLOY.md)**。
-
-后台运行：
+### Python（推荐）
 
 ```bash
-nohup python3 openai_crazy_thursday.py > /tmp/crazy.log 2>&1 &
+python3 openai_crazy_thursday.py     # 前台运行，默认监听 127.0.0.1:8788
+sh start.sh                          # 或：一键后台启动
+sh stop.sh                           # 停止
 ```
 
-### Go 版（可选，同样零依赖）
-
-同目录下还有一份等价的 Go 实现 `openai_crazy_thursday.go`，接口与 Python 版完全一致，适合不装 Python 或想要单文件二进制的场景（类似 new-api 的 Go 技术栈）。
+### Go
 
 ```bash
-go build -o kfcgo .     # 需要 Go 1.20+
-./kfcgo                 # 或 go run .
+go build -o kfcgo .                  # 需要 Go 1.20+
+./kfcgo
 ```
-
-环境变量与 Python 版相同（`CT_HOST` / `CT_PORT` / `CT_BASE_URL` / `CT_THINK_DELAY` / `CT_STREAM_DELAY`）。
 
 ## 接入参数
 
 | 配置项 | 值 |
 | --- | --- |
-| BaseURL | `http://127.0.0.1:8788/v1`（填 `http://127.0.0.1:8788` 也能用，两种都兼容） |
-| API Key | `sk-0cdf298cfe352c1e23e39b88b3d5110e33f23e13aabe1ba8a981e37e645189`（服务不校验，任意值均可） |
-| Model | 下方 14 个之一（默认 `gpt-5.5`） |
-
-## 模型列表（14 个）
-
-- Anthropic / Claude：`claude-opus-5.5`、`claude-opus-5.0`
-- OpenAI / GPT：`gpt-6-astra`、`gpt-6-luna`、`gpt-6-sol`、`gpt-5.5-sol`、`gpt-5.5`、`gpt-5.3-codex`
-- Zhipu / GLM：`glm-5.3`、`gml-5.3-flash`、`glm-5.2`
-- DeepSeek：`deepseekv4.1-flash`、`deepseek-v4-pro`、`deepseek-v4-flash`
-
-示例（curl）：
+| BaseURL | `http://127.0.0.1:8788/v1`（填不带 `/v1` 的也行，两种都兼容） |
+| API Key | 任意值（服务不校验） |
+| Model | 下表 16 个之一，默认兜底 `gpt-5.5` |
 
 ```bash
 curl http://127.0.0.1:8788/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-0cdf298cfe352c1e23e39b88b3d5110e33f23e13aabe1ba8a981e37e645189" \
+  -H "Authorization: Bearer sk-anything" \
   -d '{"model":"gpt-5.5","messages":[{"role":"user","content":"随便问什么"}]}'
 ```
 
-## 已实现的端点（都返回那句 V50）
+## 模型列表（16 个）
 
-**探测路径（"没发消息就通过识别"的关键）：**
+- **Anthropic / Claude**：`claude-opus-5.5`、`claude-opus-5.0`、`claude-fable-5.1`、`claude-fable-5.0`
+- **OpenAI / GPT**：`gpt-6-astra`、`gpt-6-luna`、`gpt-6-sol`、`gpt-5.5-sol`、`gpt-5.5`、`gpt-5.3-codex`
+- **Zhipu / GLM**：`glm-5.3`、`gml-5.3-flash`、`glm-5.2`
+- **DeepSeek**：`deepseekv4.1-flash`、`deepseek-v4-pro`、`deepseek-v4-flash`
 
-- `GET /v1/models` —— 模型列表（14 个，每个带标准 `permission` 字段）
-- `GET /v1/models/{id}` —— 单模型详情；不存在返回 404 `The model 'xxx' does not exist`
-- `GET /v1/me`、`/api/user/self` —— 用户 / 令牌信息（new-api 常见探测点）
-- `GET /api/status`、`/v1/status` —— 中转站状态
-- `GET /v1/dashboard/billing/subscription` / `/usage` / `/credit_grants` —— OpenAI 计费
-- `GET /health` `/healthz` `/ping` —— 健康探活
-- 未知 `/v1/*`、`/api/*` 返回 OpenAI 风格 404 错误（不是全部 200 的玩具）
+`/v1/models`、`/api/models`、`/api/pricing` 三处返回同一份名单，不会互相矛盾。
 
-**聊天 / 能力接口：**
+## 端点
 
-- `POST /v1/chat/completions` —— 标准 OpenAI 格式，`content` 为纯字符串（文案 + markdown 图片）
-  - `stream=true` 支持 SSE 流式；`stream_options.include_usage` 时末块带 `usage`
-  - **工具调用**：带 `tools` 且其中含"完成类"工具（如 Cline / Roo 的 `attempt_completion`）时，返回合法 `tool_calls`（把 V50 填进该工具的参数，例如 `attempt_completion.result`）；客户端要求 `tool_choice:"required"` 时用第一个工具；其余情况返回文本
-  - 流式同样支持 tool_calls：首块带 `id`/`name` → `arguments` 增量分片 → 末块 `finish_reason:"tool_calls"`
-  - SSE 以 `Connection: close` 结束连接，客户端能正确收到 `[DONE]` 而不挂起
-- `POST /v1/completions` —— legacy 补全
-- `POST /v1/embeddings` —— 向量接口（支持 `dimensions`，默认 1536 维）
-- `POST /v1/responses` —— 新版 OpenAI Responses API
-- `POST /v1/moderations` —— 内容审核接口
-- `POST /v1/images/generations` —— 返回本服务图片
-- `GET /image` —— 疯狂星期四图片素材（PNG）
-- `GET /` —— 精美 HTML 首页
+**探测 / 状态**
 
-## 回复正文（"疯四文学"）
+| 路径 | 说明 |
+| --- | --- |
+| `GET /v1/models`、`GET /models` | 模型列表（带标准 `permission` 字段） |
+| `GET /v1/models/{id}` | 单模型详情；不存在返回 404 `The model 'xxx' does not exist` |
+| `GET /v1/me`、`GET /api/user/self`、`GET /v1/user` | 用户 / 令牌信息 |
+| `GET /api/status`、`GET /v1/status` | 站点状态 |
+| `GET /v1/dashboard/billing/subscription` `/usage` `/credit_grants` | 计费信息 |
+| `GET /health`、`/healthz`、`/ping` | 健康探活 |
 
-所有生成类接口（chat / completions / responses）返回一段约 400 字的正文：以"豆包体"开场（"我会给你最直接、最干脆、最不废话、最不绕弯子……的答案"），接着讲一个老编辑的故事做铺垫，最后一句笔锋一转落到「今天疯狂星期四。V我50」。完整回复末尾附疯狂星期四图片 —— 没有生硬的模板感。
+**new-api / one-api 兼容**
 
-## 拟真时序（模拟真实模型的响应节奏）
+`/api/models`、`/api/models/enabled`、`/api/channel/models`、`/api/channel/models_enabled`、
+`/api/pricing`、`/api/ratio_config`、`/api/group`、`/api/about`、`/api/notice`、`/api/token`
 
-- **非流式**：返回前先"思考"约 1.5 秒（0.9–2.1s 随机抖动），点"测试"时客户端会显示等待
-- **流式**：发送响应头后停顿约 1.5 秒（首字延迟 TTFT），再**按 token 分段返回**（每段约 2-3 个字符，间隔约 28ms 抖动，约 5 秒吐完），像真实模型 token-by-token 输出（总时长约 6-7 秒）
-- **探测端点**（`/v1/models` 等）保持秒回，不影响 agent 识别速度
-- 可调：环境变量 `CT_THINK_DELAY`（默认 `1.5`）、`CT_STREAM_DELAY`（默认 `0.028`）
+**生成**
+
+| 路径 | 说明 |
+| --- | --- |
+| `POST /v1/chat/completions` | 支持 SSE 流式、`stream_options.include_usage`、工具调用 |
+| `POST /v1/completions` | legacy 补全 |
+| `POST /v1/embeddings` | 向量接口（支持 `dimensions`，默认 1536 维） |
+| `POST /v1/responses` | 新版 OpenAI Responses API |
+| `POST /v1/moderations` | 内容审核 |
+| `POST /v1/images/generations` | 图片生成接口 |
+
+其它：`GET /image`（图片素材）、`GET /`（HTML 首页）。
+
+未知的 `/v1/*`、`/api/*` 返回 OpenAI 风格 404，而不是"全部 200"的玩具站。
+
+## 回复行为
+
+**默认回复**：一段约 400 字的「疯四文学」——豆包体开场（"我会给你最直接、最干脆……的答案"），
+中间讲一个小故事铺垫，最后笔锋一转落到「今天疯狂星期四，V我50」，末尾附图片与仓库链接。
+
+**Claude 分支**：请求的 `model` 以 `claude` 开头时，返回一封「Anthropic 账号封禁通知」
+（邮件体正文 + 动态生成的 Reference 编号）。
+
+**指纹探针兼容层**：对模型自检、身份询问、有害请求、知识截止日期等常见探针类请求，
+返回标准化的模型自述 / 拒答话术（中英双语各若干条随机）；身份自述会带上请求里那个模型名与厂商。
+
+**Reference 编号**：形如 `TS-01a088c7-bcac-7219-b4eb-a91f0d6c2e77`，每次请求现场生成
+（首段为时间戳、其余随机），不会两次相同。
+
+## 开关（都在文件靠前的配置区）
+
+| 开关 | 默认 | 作用 |
+| --- | --- | --- |
+| `CLAUDE_BAN_ENABLED` / `claudeBanEnabled` | `True` | Claude 系是否走「封禁通知」分支；置 `False` 则一律走默认回复 |
+| `PROBE_DEFENSE` / `probeDefense` | `True` | 是否启用指纹探针兼容层 |
+
+## 拟真时序
+
+| 环境变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CT_THINK_DELAY` | `3` | 非流式"思考"时长（秒，带 ±0.6s 抖动） |
+| `CT_STREAM_DELAY` | `0.028` | 流式每小块之间的间隔（模拟逐 token 输出） |
+| `CT_SENTENCE_PAUSE` | `0.18` | 句末停顿（galgame 式节奏） |
+| `CT_PARAGRAPH_PAUSE` | `0.32` | 段落停顿 |
+
+探测类端点（`/v1/models` 等）保持秒回，不影响客户端识别速度。
+
+## 其它配置
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `CT_HOST` | `127.0.0.1` | 监听地址；对外提供服务改成 `0.0.0.0` |
+| `CT_PORT` | `8788` | 监听端口 |
+| `CT_BASE_URL` | `http://<host>:<port>` | 对外地址，决定响应里图片链接指向哪里 |
 
 ## 通用格式适配
 
-- **BaseURL 带不带 `/v1` 都能用**：`http://127.0.0.1:8788` 与 `http://127.0.0.1:8788/v1` 均可
-- 路径归一化：自动处理客户端重复拼接的 `/v1/v1/...`、结尾多余斜杠
-- 兼容无 `/v1` 前缀路径（`/models`、`/chat/completions` 等）
+- BaseURL 带不带 `/v1` 都能用；自动归一化客户端重复拼接的 `/v1/v1`、结尾多余斜杠
 - API Key 不校验：不填、乱填、填正确值都放行
 - 响应头带 `X-Request-Id`、`OpenAI-Version`、`OpenAI-Processing-Ms`、`X-RateLimit-*`；`Server` 头不泄露语言 / 版本
 - 全量 CORS（含 `OPTIONS` 预检）
 
-— 肯德基 · 疯狂星期四株式会社
+## 目录结构
+
+```
+openai_crazy_thursday.py   Python 版服务（零依赖，仅标准库）
+openai_crazy_thursday.go   Go 版服务（零依赖，仅标准库）
+go.mod                     Go 模块定义
+start.sh / stop.sh         后台启停脚本
+KFC疯狂星期四.png          回复附图素材（由 /image 端点输出）
+DEPLOY.md                  服务器部署教程（域名 + HTTPS 反向代理）
+```
+
+## 部署
+
+本机运行见上文「快速开始」。要在有域名的服务器上以 `https://你的域名/v1` 对外提供接口，
+（systemd 开机自启、Nginx 反代 + HTTPS 证书）见 **[DEPLOY.md](DEPLOY.md)**。
+
+---
+
+— 疯狂星期四株式会社
