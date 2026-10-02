@@ -253,4 +253,4 @@ CT_PORT=9000 python3 openai_crazy_thursday.py
 
 ---
 
-— 沈屿 · 疯狂星期四株式会社
+— 疯狂星期四株式会社
