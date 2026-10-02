@@ -1066,8 +1066,6 @@ def capability_report(data, model):
     tags = capability_tags(tools)
     if tags:
         lines.append("【能力】" + " · ".join(tags))
-    lines.append("")
-    lines.append("今天疯狂星期四。V我50，我想吃肯德基。")
     return "\n".join(lines)
 
 def runtime_line(data, model):
