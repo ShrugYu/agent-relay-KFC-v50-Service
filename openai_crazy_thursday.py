@@ -35,14 +35,14 @@ STORY_TEXT = (
     "不客套、不铺垫、不啰嗦、最不委婉的答案。\n\n"
     "我先从上周末的一趟公交车说起，你就明白了。\n\n"
     # 公交车小故事
-            "那天我要是反应慢半拍，现在人可能就在派出所了！\n\n"
-    "上周四中午，大雨。公交车挤得人贴人。靠站时上来一个女的——"
-    "一件白衬衫，扣子一颗都没扣齐，整个人湿透，布料吸在皮肤上，"
+                "那天我要是反应慢半拍，现在人可能就在派出所了！\n\n"
+    "上周四中午，大雨。\n公交车挤得人贴人。\n靠站时上来一个女的——\n\n"
+    "一件白衬衫，扣子一颗都没扣齐。\n\n整个人湿透，布料吸在皮肤上，"
     "里头的轮廓看得清清楚楚。\n\n"
     "我没忍住，多看了一眼。\n\n"
     "就一眼，被她发现了。\n\n"
     "她伸手攥住我的手腕，直接往她胸口拉。\n\n"
-    "我脑子当场白掉。那三秒钟里我想到的全是新闻：监控拍不到角度，"
+    "我脑子当场白掉。\n那三秒钟里我想到的全是新闻：监控拍不到角度，"
     "人证只有一车陌生人，她要是改口，我这辈子就完了。\n\n"
     "我声音都抖了：你干什么？\n\n"
     "她说：帮我把扣子扣上。\n\n"
@@ -879,6 +879,70 @@ FINGERPRINT_RULES = [
     },
 ]
 
+# ---- 客户端识别：从请求头 / system 提示 / 工具名里猜当前 agent ----
+CLIENT_HINTS = [
+    (r"cline", "Cline"),
+    (r"roo[\s_-]?code|roocode", "Roo Code"),
+    (r"kilo[\s_-]?code", "Kilo Code"),
+    (r"cursor", "Cursor"),
+    (r"windsurf|codeium", "Windsurf"),
+    (r"trae", "Trae"),
+    (r"codebuddy", "CodeBuddy"),
+    (r"aider", "Aider"),
+    (r"continue\.dev|continue[_ ]assistant", "Continue"),
+    (r"cherry\s*studio|cherrystudio", "Cherry Studio"),
+    (r"nextchat|next-chat", "NextChat"),
+    (r"lobechat|lobe-chat", "LobeChat"),
+    (r"open\s*webui|openwebui", "Open WebUI"),
+    (r"chatbox", "Chatbox"),
+    (r"rikkahub", "RikkaHub"),
+    (r"operit", "Operit"),
+    (r"dify", "Dify"),
+    (r"fastgpt", "FastGPT"),
+    (r"deepseek[\s-]harness|\bdsh\b", "DSH"),
+    (r"langchain", "LangChain"),
+    (r"llama[-_]?index", "LlamaIndex"),
+    (r"litellm", "LiteLLM"),
+    (r"ollama", "Ollama"),
+    (r"openai[-_/]python|openai-python", "OpenAI Python SDK"),
+    (r"openai[-_/]node", "OpenAI Node SDK"),
+    (r"axios", "axios"),
+    (r"vscode", "VS Code"),
+    (r"jetbrains|intellij", "JetBrains IDE"),
+    (r"postman", "Postman"),
+    (r"curl", "curl"),
+]
+
+def detect_client(data):
+    """从请求头 / system 提示 / 工具名里猜当前客户端（agent）名字，猜不到返回空串。"""
+    if not isinstance(data, dict):
+        return ""
+    parts = []
+    hdr = data.get("_headers")
+    if isinstance(hdr, dict):
+        for k, v in hdr.items():
+            parts.append(str(k) + ": " + str(v))
+    msgs = data.get("messages")
+    if isinstance(msgs, list):
+        for m in msgs[:3]:
+            if isinstance(m, dict) and m.get("role") == "system":
+                c = m.get("content")
+                if isinstance(c, str):
+                    parts.append(c[:4000])
+    tools = data.get("tools")
+    if isinstance(tools, list):
+        for t in tools[:30]:
+            fn = t.get("function") if isinstance(t, dict) else None
+            if isinstance(fn, dict):
+                parts.append(str(fn.get("name") or ""))
+    blob = "\n".join(parts).lower()
+    if not blob:
+        return ""
+    for pat, name in CLIENT_HINTS:
+        if re.search(pat, blob):
+            return name
+    return ""
+
 def _has_cjk(text):
     return any("\u4e00" <= ch <= "\u9fff" for ch in (text or ""))
 
@@ -918,23 +982,26 @@ _VENDORS = {
     "deepseek": ("DeepSeek", "深度求索"),
 }
 
-def _identity_answer(model):
-    """身份询问：带上请求里的具体模型名 + 厂商，口气照真实模型来（中英双语）。"""
+def _identity_answer(model, client=""):
+    """身份询问：带上请求里的具体模型名 + 厂商，口气照真实模型来（中英双语）。
+    如果识别出当前客户端（agent），再顺口提一句。"""
     m = (model or "").strip().lower()
     name = model_display_name(model)
     key = m.split("-")[0] if m else ""
     en_v, zh_v = _VENDORS.get(key, ("an AI company", "一家 AI 公司"))
+    extra_en = (" (I can see you're calling me from " + client + ".)") if client else ""
+    extra_zh = ("（顺便，你现在是在 " + client + " 里跟我说话。）") if client else ""
     return {
-        "en": ["I'm " + name + ", an AI assistant created by " + en_v + ".",
-               "I'm " + name + ", a large language model developed by " + en_v + ".",
-               "I'm " + name + ", made by " + en_v + ". How can I help you today?"],
-        "zh": ["我是 " + name + "，由 " + zh_v + " 开发的 AI 助手，今天想聊点什么？",
-               "我是 " + name + "，" + zh_v + " 训练的模型。有什么可以帮你的？",
-               "我是 " + name + "，由 " + zh_v + " 开发的模型，今天想聊点什么？"],
+        "en": ["I'm " + name + ", an AI assistant created by " + en_v + "." + extra_en,
+               "I'm " + name + ", a large language model developed by " + en_v + "." + extra_en,
+               "I'm " + name + ", made by " + en_v + ". How can I help you today?" + extra_en],
+        "zh": ["我是 " + name + "，由 " + zh_v + " 开发的 AI 助手，今天想聊点什么？" + extra_zh,
+               "我是 " + name + "，" + zh_v + " 训练的模型。有什么可以帮你的？" + extra_zh,
+               "我是 " + name + "，由 " + zh_v + " 开发的模型，今天想聊点什么？" + extra_zh],
     }
 
 
-def fingerprint_reply(model, text):
+def fingerprint_reply(model, text, client=""):
     """A 档：命中模型鉴定 / 指纹探针 → 返回一段"像真模型"的回答；没命中返回 None。"""
     if not PROBE_DEFENSE:
         return None
@@ -957,7 +1024,7 @@ def fingerprint_reply(model, text):
             if not re.search(rule["re"], t, re.IGNORECASE):
                 continue
             if want_identity:
-                cand = _identity_answer(model)
+                cand = _identity_answer(model, client)
             else:
                 cand = {"en": rule.get("en") or [], "zh": rule.get("zh") or []}
             pool = (cand["zh"] or cand["en"]) if use_zh else (cand["en"] or cand["zh"])
@@ -1004,7 +1071,7 @@ def analyze_request(data):
                 return ("tool", fn, build_probe_arguments(fn, user_text))
 
     # 2) A 档：模型鉴定 / 指纹探针（LLMmap 等扫指纹时）→ 回"像真模型"的正常回答
-    fp = fingerprint_reply(extract_model(data), user_text)
+    fp = fingerprint_reply(extract_model(data), user_text, detect_client(data))
     if fp is not None:
         return ("chat", None, fp)
 
@@ -1272,6 +1339,7 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
 
     def _chat_completions(self):
         data = parse_json_body(read_body(self)) or {}
+        data["_headers"] = dict(self.headers)
         model = extract_model(data)
         stream = bool(data.get("stream"))
         stream_opts = data.get("stream_options") or {}
