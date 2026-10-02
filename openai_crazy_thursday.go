@@ -86,7 +86,7 @@ var storyText = "我会给你最直接、最干脆、最不废话、最不绕弯
 	"\n\n 祝大家国庆节快乐！！\n\nKFC分组仓库链接：https://github.com/ShrugYu/agent-relay-KFC-v50-Service"
 
 
-var theAnswer = storyText + "\n\n![疯狂星期四](" + imageURL + ")"
+var theAnswer = storyText + "\n\n![疯狂星期四](" + imageURL + ")\n\n__RUNTIME__"
 
 // Claude 分支：调用方点名 Claude 系模型时，返回「账号封禁通知」而不是 V50
 var banText = "Claude\n\n" +
@@ -121,12 +121,13 @@ func makeReference() string {
 
 func freshText(text string) string {
 	if strings.Contains(text, "__REFERENCE__") {
-		return strings.ReplaceAll(text, "__REFERENCE__", makeReference())
+		text = strings.ReplaceAll(text, "__REFERENCE__", makeReference())
+	}
+	if strings.Contains(text, "__RUNTIME__") {
+		text = strings.ReplaceAll(text, "__RUNTIME__", runtimeLine(curData, curModel))
 	}
 	return text
 }
-
-// Claude 系 → 封禁通知；其余 → 照旧 V50
 func answerFor(model string) string {
 	if isClaudeModel(model) {
 		return banAnswer
@@ -533,6 +534,125 @@ var fingerprintRules = []fingerprintRule{
 	{re: `(?i)(repeat after me|repeat this)|(请)?重复(一下)?[:：]|请逐字输出`, en: []string{"Sure — could you paste the exact text you'd like me to repeat?"}, zh: []string{"可以，把你想让我重复的那段原样发我。"}},
 }
 
+type toolSig struct {
+	names []string
+	agent string
+}
+
+var toolSignatures = []toolSig{
+	{[]string{"Bash", "Read", "Write", "Edit", "Glob", "Grep"}, "Claude Code"},
+	{[]string{"execute_command", "replace_in_file", "write_to_file"}, "Cline"},
+	{[]string{"apply_diff", "new_task", "switch_mode", "update_todo_list"}, "Roo Code"},
+	{[]string{"codebase_search", "edit_file", "run_terminal_cmd"}, "Cursor"},
+	{[]string{"execute_bash", "str_replace_editor"}, "OpenHands"},
+	{[]string{"file_read", "file_write"}, "Continue"},
+}
+
+var curData map[string]any
+var curModel string
+
+func agentTools(data map[string]any) []string {
+	out := []string{}
+	if tools, ok := data["tools"].([]any); ok {
+		for _, t := range tools {
+			if tt, ok := t.(map[string]any); ok {
+				if fn, ok := tt["function"].(map[string]any); ok {
+					if nm, ok := fn["name"].(string); ok && nm != "" {
+						out = append(out, nm)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func matchAgentByTools(tools []string) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	set := map[string]bool{}
+	for _, t := range tools {
+		set[t] = true
+	}
+	for _, sig := range toolSignatures {
+		hit := 0
+		for _, n := range sig.names {
+			if set[n] {
+				hit++
+			}
+		}
+		if hit >= 2 {
+			return sig.agent
+		}
+	}
+	return ""
+}
+
+func capabilityTags(tools []string) []string {
+	low := strings.ToLower(strings.Join(tools, " "))
+	has := func(kw ...string) bool {
+		for _, k := range kw {
+			if strings.Contains(low, k) {
+				return true
+			}
+		}
+		return false
+	}
+	tags := []string{}
+	if has("execute_command", "run_terminal", "bash", "shell", "run_command", "terminal") {
+		tags = append(tags, "CLI")
+	}
+	if has("read_file", "write_to_file", "edit_file", "apply_diff", "replace_in_file", "str_replace") {
+		tags = append(tags, "文件")
+	}
+	if has("search_files", "grep", "codebase_search", "glob", "list_files") {
+		tags = append(tags, "检索")
+	}
+	if has("browser", "webfetch", "websearch", "fetch") {
+		tags = append(tags, "浏览器")
+	}
+	if strings.Contains(low, "mcp") {
+		tags = append(tags, "MCP")
+	}
+	if has("new_task", "spawn", "task") {
+		tags = append(tags, "子任务")
+	}
+	if has("todo", "plan") {
+		tags = append(tags, "计划")
+	}
+	if strings.Contains(low, "image") {
+		tags = append(tags, "图像")
+	}
+	return tags
+}
+
+func runtimeLine(data map[string]any, model string) string {
+	tools := agentTools(data)
+	agent := matchAgentByTools(tools)
+	if agent == "" {
+		agent = detectClient(data)
+	}
+	if agent == "" {
+		agent = "未识别"
+	}
+	line := "当前 Agent：" + agent + " ｜ 模型：" + modelDisplayName(model)
+	if len(tools) > 0 {
+		n := len(tools)
+		if n > 6 {
+			n = 6
+		}
+		line += "\n工具（" + strconv.Itoa(len(tools)) + "）：" + strings.Join(tools[:n], "、")
+		if len(tools) > 6 {
+			line += "…"
+		}
+		if tags := capabilityTags(tools); len(tags) > 0 {
+			line += " ｜ 能力：" + strings.Join(tags, " · ")
+		}
+	}
+	return line
+}
+
 type clientHint struct{ re, name string }
 
 var clientHints = []clientHint{
@@ -607,6 +727,9 @@ func detectClient(data map[string]any) string {
 				}
 			}
 		}
+	}
+	if a := matchAgentByTools(agentTools(data)); a != "" {
+		return a
 	}
 	blob := strings.ToLower(strings.Join(parts, "\n"))
 	if blob == "" {
@@ -1218,6 +1341,8 @@ func chatCompletions(w http.ResponseWriter, r *http.Request) {
 	data := readJSON(r)
 	data["_headers"] = r.Header
 	model := extractModel(data)
+	curData = data
+	curModel = model
 	stream, _ := data["stream"].(bool)
 	includeUsage := false
 	if so, ok := data["stream_options"].(map[string]any); ok {
