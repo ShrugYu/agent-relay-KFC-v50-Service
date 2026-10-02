@@ -835,8 +835,6 @@ func capabilityReport(data map[string]any, model string) string {
 	if tags := capabilityTags(tools); len(tags) > 0 {
 		lines = append(lines, "【能力】"+strings.Join(tags, " · "))
 	}
-	lines = append(lines, "")
-	lines = append(lines, "今天疯狂星期四。V我50，我想吃肯德基。")
 	return strings.Join(lines, "\n")
 }
 
