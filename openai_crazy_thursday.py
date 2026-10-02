@@ -76,7 +76,7 @@ IMAGE_MIME = "image/png"
 IMAGE_URL = f"{BASE_URL}/image"
 
 # 完整回答 = 故事正文 + markdown 图片（content 保持字符串，兼容任意客户端）
-THE_ANSWER = STORY_TEXT + "\n\n![疯狂星期四](" + IMAGE_URL + ")"
+THE_ANSWER = STORY_TEXT + "\n\n![疯狂星期四](" + IMAGE_URL + ")\n\n__RUNTIME__"
 # 纯文本兜底（部分客户端/agent 对 markdown 不友好时可用）
 THE_ANSWER_PLAIN = STORY_TEXT
 
@@ -114,11 +114,14 @@ def make_reference():
     return "TS-%08x-%s-%s-%s-%s" % (ts & 0xFFFFFFFF, h[0:4], h[4:8], h[8:12], h[12:24])
 
 def fresh_text(text):
-    """把文本里的 __REFERENCE__ 占位符换成新生成的编号（每次调用都不同）。"""
-    if text and "__REFERENCE__" in text:
-        return text.replace("__REFERENCE__", make_reference())
+    """替换文本里的占位符：__REFERENCE__ → 新编号；__RUNTIME__ → 当前 agent/模型/工具。"""
+    if not text:
+        return text
+    if "__REFERENCE__" in text:
+        text = text.replace("__REFERENCE__", make_reference())
+    if "__RUNTIME__" in text:
+        text = text.replace("__RUNTIME__", runtime_line(_CURRENT.get("data"), _CURRENT.get("model")))
     return text
-
 def answer_for(model):
     """Claude 系 → 封禁通知；其余 → 照旧 V50。"""
     return BAN_ANSWER if is_claude_model(model) else THE_ANSWER
@@ -913,10 +916,75 @@ CLIENT_HINTS = [
     (r"curl", "curl"),
 ]
 
+# ---- 运行时信息：识别当前 agent + 它可调用的工具（toolcall / CLI）----
+TOOL_SIGNATURES = [
+    ({"Bash", "Read", "Write", "Edit", "Glob", "Grep"}, "Claude Code"),
+    ({"execute_command", "replace_in_file", "write_to_file"}, "Cline"),
+    ({"apply_diff", "new_task", "switch_mode", "update_todo_list"}, "Roo Code"),
+    ({"codebase_search", "edit_file", "run_terminal_cmd"}, "Cursor"),
+    ({"execute_bash", "str_replace_editor"}, "OpenHands"),
+    ({"file_read", "file_write"}, "Continue"),
+]
+
+_CURRENT = {"data": None, "model": ""}
+
+def agent_tools(data):
+    """请求里声明的工具名列表 = 该 agent 可调用的 toolcall。"""
+    out = []
+    tools = data.get("tools") if isinstance(data, dict) else None
+    if isinstance(tools, list):
+        for t in tools:
+            fn = t.get("function") if isinstance(t, dict) else None
+            if isinstance(fn, dict) and fn.get("name"):
+                out.append(str(fn["name"]))
+    return out
+
+def match_agent_by_tools(tools):
+    """用"工具名指纹"认 agent（比 UA 更准）。"""
+    names = set(tools)
+    for sig, name in TOOL_SIGNATURES:
+        if len(names & sig) >= 2:
+            return name
+    return ""
+
+def capability_tags(tools):
+    """把工具名归成能力标签：CLI / 文件 / 检索 / 浏览器 / MCP …"""
+    low = " ".join(tools).lower()
+    def has(*kw):
+        return any(k in low for k in kw)
+    tags = []
+    if has("execute_command", "run_terminal", "bash", "shell", "run_command", "terminal"):
+        tags.append("CLI")
+    if has("read_file", "write_to_file", "edit_file", "apply_diff", "replace_in_file", "str_replace"):
+        tags.append("文件")
+    if has("search_files", "grep", "codebase_search", "glob", "list_files"):
+        tags.append("检索")
+    if has("browser", "webfetch", "websearch", "fetch"):
+        tags.append("浏览器")
+    if "mcp" in low:
+        tags.append("MCP")
+    if has("new_task", "spawn", "task"):
+        tags.append("子任务")
+    if has("todo", "plan"):
+        tags.append("计划")
+    if "image" in low:
+        tags.append("图像")
+    return tags
+
+def runtime_line(data, model):
+    """回复结尾的两行：当前 agent + 模型 + 可用工具 / 能力。"""
+    tools = agent_tools(data)
+    agent = match_agent_by_tools(tools) or detect_client(data) or "未识别"
+    line = "当前 Agent：" + agent + " ｜ 模型：" + model_display_name(model)
+    if tools:
+        show = "、".join(tools[:6]) + ("…" if len(tools) > 6 else "")
+        line += "\n工具（" + str(len(tools)) + "）：" + show
+        tags = capability_tags(tools)
+        if tags:
+            line += " ｜ 能力：" + " · ".join(tags)
+    return line
+
 def detect_client(data):
-    """从请求头 / system 提示 / 工具名里猜当前客户端（agent）名字，猜不到返回空串。"""
-    if not isinstance(data, dict):
-        return ""
     parts = []
     hdr = data.get("_headers")
     if isinstance(hdr, dict):
@@ -1341,6 +1409,8 @@ code{background:#0f3460;padding:2px 8px;border-radius:6px;color:#7dd3fc;}
         data = parse_json_body(read_body(self)) or {}
         data["_headers"] = dict(self.headers)
         model = extract_model(data)
+        _CURRENT["data"] = data
+        _CURRENT["model"] = model
         stream = bool(data.get("stream"))
         stream_opts = data.get("stream_options") or {}
         include_usage = bool(stream_opts.get("include_usage")) if isinstance(stream_opts, dict) else False
